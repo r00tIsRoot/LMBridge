@@ -2,3 +2,8 @@
 /.gradle/
 /build/
 /lmbridge/build/
+
+.idea/
+local.properties
+*.litertlm
+build/
