@@ -3,16 +3,19 @@ package com.isroot.lmbridge.models
 import android.graphics.Bitmap
 
 sealed class MultimodalContent {
-    data class TextContent(val text: String) : MultimodalContent()
-    data class ImageContent(val image: Bitmap) : MultimodalContent()
-    data class AudioContent(val audioBytes: ByteArray) : MultimodalContent()
-    data class VideoContent(val videoUri: String) : MultimodalContent()
+    data class Text(val text: String) : MultimodalContent()
+    data class Image(val bitmap: Bitmap) : MultimodalContent()
+    data class Audio(val bytes: ByteArray) : MultimodalContent()
 }
 
 data class MultimodalInput(
-    val parts: List<MultimodalContent>
+    val parts: List<MultimodalContent>,
 ) {
     companion object {
-        fun text(text: String) = MultimodalInput(listOf(MultimodalContent.TextContent(text)))
+        fun text(prompt: String) = MultimodalInput(listOf(MultimodalContent.Text(prompt)))
+
+        fun textAndImages(prompt: String, images: List<Bitmap>) = MultimodalInput(
+            images.map { MultimodalContent.Image(it) } + MultimodalContent.Text(prompt),
+        )
     }
 }

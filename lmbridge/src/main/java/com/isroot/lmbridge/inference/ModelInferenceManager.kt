@@ -1,31 +1,35 @@
 package com.isroot.lmbridge.inference
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
-import com.isroot.lmbridge.models.MultimodalContent
-import com.isroot.lmbridge.models.MultimodalInput
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.MessageCallback
+import com.google.ai.edge.litertlm.ToolProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-import com.google.ai.edge.litertlm.Content
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.Message
-
 class ModelInferenceManager(
     private val context: Context,
-    private val modelPath: String? = null
+    private val modelPath: String? = null,
 ) {
-    // 실제 LiteRT-LM 엔진 인스턴스
-    private var llmEngine: Engine? = null
-    
+    private var engine: Engine? = null
+    private var currentConversation: Conversation? = null
+
     suspend fun initialize() = withContext(Dispatchers.IO) {
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
-            extractAssetIfNeeded(context, "gemma-4-E2B-it.litertlm")
+            extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
         } else {
             modelPath
         }
@@ -34,7 +38,7 @@ class ModelInferenceManager(
             modelPath = finalModelPath,
             backend = Backend.NPU(),
         )
-        llmEngine = Engine(engineConfig).apply {
+        engine = Engine(engineConfig).apply {
             initialize()
         }
     }
@@ -51,56 +55,152 @@ class ModelInferenceManager(
         return outFile.absolutePath
     }
 
-    suspend fun generate(input: MultimodalInput): String = withContext(Dispatchers.IO) {
-        // Build Contents from multimodal input parts
-        val contentsBuilder = Contents.Builder()
-        
-        for (part in input.parts) {
-            when (part) {
-                is MultimodalContent.TextContent -> {
-                    contentsBuilder.add(Content.Text(part.text))
-                }
-                is MultimodalContent.ImageContent -> {
-                    // Convert Bitmap to PNG bytes for LiteRT-LM
-                    val imageBytes = part.image.toByteArray()
-                    contentsBuilder.add(Content.Blob("image/png", imageBytes))
-                }
-                is MultimodalContent.AudioContent -> {
-                    contentsBuilder.add(Content.Blob("audio/wav", part.audioBytes))
-                }
-                is MultimodalContent.VideoContent -> {
-                    // Video: use Content.ImageFile for file path
-                    val videoFile = File(part.videoUri)
-                    if (videoFile.exists()) {
-                        contentsBuilder.add(Content.ImageFile(part.videoUri))
-                    }
-                }
-            }
-        }
-        
-        val conversationConfig = ConversationConfig(
-            systemInstruction = Contents.of("You are a helpful assistant."),
-            initialMessages = emptyList(),
+    fun generate(
+        prompt: String,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val engine = this@ModelInferenceManager.engine
+            ?: throw IllegalStateException("Engine not initialized")
+
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
         )
-        
-        val responseBuilder = StringBuilder()
-        llmEngine?.createConversation(conversationConfig)?.use { conversation ->
-            // Send multimodal content and collect streaming response
-            conversation.sendMessageAsync(contentsBuilder.build()).collect { token ->
-                responseBuilder.append(token)
-            }
+
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+
+        conversation.sendMessageAsync(
+            Contents.of(prompt),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+
+        awaitClose {
+            conversation.cancelProcess()
         }
-        
-        return@withContext responseBuilder.toString().ifEmpty { "Error: Failed to generate response" }
     }
-    
-    private fun Bitmap.toByteArray(): ByteArray {
-        val stream = java.io.ByteArrayOutputStream()
-        this.compress(Bitmap.CompressFormat.PNG, 100, stream)
-        return stream.toByteArray()
+
+    fun generateWithImages(
+        prompt: String,
+        images: List<Bitmap>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val engine = this@ModelInferenceManager.engine
+            ?: throw IllegalStateException("Engine not initialized")
+
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
+        )
+
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+
+        val contents = mutableListOf<Content>()
+        images.forEach { bitmap ->
+            contents.add(Content.ImageBytes(bitmap.toPngBytes()))
+        }
+        contents.add(Content.Text(prompt))
+
+        conversation.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+
+        awaitClose {
+            conversation.cancelProcess()
+        }
     }
-    
+
+    fun generateWithTools(
+        prompt: String,
+        tools: List<ToolProvider>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val engine = this@ModelInferenceManager.engine
+            ?: throw IllegalStateException("Engine not initialized")
+
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
+            tools = tools,
+        )
+
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+
+        conversation.sendMessageAsync(
+            Contents.of(prompt),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+
+        awaitClose {
+            conversation.cancelProcess()
+        }
+    }
+
+    fun stopGeneration() {
+        currentConversation?.cancelProcess()
+    }
+
     fun close() {
-        llmEngine?.close()
+        currentConversation?.close()
+        engine?.close()
     }
+
+    companion object {
+        private const val DEFAULT_MODEL_FILE = "gemma-4-E2B-it.litertlm"
+        private const val DEFAULT_SYSTEM_INSTRUCTION = "You are a helpful AI assistant."
+    }
+}
+
+sealed class GenerationResult {
+    data class Token(val text: String) : GenerationResult()
+    data object Done : GenerationResult()
+    data class Error(val message: String) : GenerationResult()
+}
+
+private fun Bitmap.toPngBytes(): ByteArray {
+    val stream = java.io.ByteArrayOutputStream()
+    compress(Bitmap.CompressFormat.PNG, 100, stream)
+    return stream.toByteArray()
 }

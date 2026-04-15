@@ -1,36 +1,55 @@
 package com.isroot.lmbridge
 
 import android.content.Context
+import android.graphics.Bitmap
+import com.google.ai.edge.litertlm.ToolProvider
+import com.isroot.lmbridge.inference.GenerationResult
 import com.isroot.lmbridge.inference.ModelInferenceManager
 import com.isroot.lmbridge.models.MultimodalInput
+import kotlinx.coroutines.flow.Flow
 
-/**
- * LMBridge SDK 진입점.
- * 클라이언트 앱은 이 클래스를 통해 모델 초기화 및 추론을 수행합니다.
- */
 class LMBridgeClient private constructor(
     private val context: Context,
-    private val modelPath: String? = null
+    private val modelPath: String? = null,
 ) {
     private val inferenceManager = ModelInferenceManager(context, modelPath)
 
-    /**
-     * 지정된 모델 경로를 사용하여 AI 추론 엔진을 초기화합니다.
-     */
     suspend fun initialize() {
         inferenceManager.initialize()
     }
 
-    /**
-     * 멀티모달 입력(텍스트, 이미지, 오디오 등)을 기반으로 결과를 생성합니다.
-     */
-    suspend fun generateResponse(input: MultimodalInput): String {
-        return inferenceManager.generate(input)
+    fun generate(prompt: String): Flow<GenerationResult> {
+        return inferenceManager.generate(prompt)
     }
 
-    /**
-     * 리소스를 해제합니다.
-     */
+    fun generateWithImages(prompt: String, images: List<Bitmap>): Flow<GenerationResult> {
+        return inferenceManager.generateWithImages(prompt, images)
+    }
+
+    fun generateWithTools(
+        prompt: String,
+        tools: List<ToolProvider>,
+    ): Flow<GenerationResult> {
+        return inferenceManager.generateWithTools(prompt, tools)
+    }
+
+    fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> {
+        val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
+        val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
+
+        return if (images.isNotEmpty()) {
+            val prompt = texts.joinToString(" ") { it.text }
+            inferenceManager.generateWithImages(prompt, images.map { it.bitmap })
+        } else {
+            val prompt = texts.joinToString(" ") { it.text }
+            inferenceManager.generate(prompt)
+        }
+    }
+
+    fun stopGeneration() {
+        inferenceManager.stopGeneration()
+    }
+
     fun release() {
         inferenceManager.close()
     }
@@ -39,7 +58,7 @@ class LMBridgeClient private constructor(
         private var modelPath: String? = null
 
         fun setModelPath(path: String): Builder {
-            this.modelPath = path
+            modelPath = path
             return this
         }
 
