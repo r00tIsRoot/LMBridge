@@ -3,6 +3,7 @@ package com.isroot.lmbridge
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.ai.edge.litertlm.ToolProvider
+import com.isroot.lmbridge.download.ModelDownloadManager
 import com.isroot.lmbridge.inference.GenerationResult
 import com.isroot.lmbridge.inference.ModelInferenceManager
 import com.isroot.lmbridge.models.MultimodalInput
@@ -13,6 +14,7 @@ class LMBridgeClient private constructor(
     private val modelPath: String? = null,
 ) {
     private val inferenceManager = ModelInferenceManager(context, modelPath)
+    private val downloadManager = ModelDownloadManager(context)
 
     suspend fun initialize() {
         inferenceManager.initialize()
@@ -53,6 +55,8 @@ class LMBridgeClient private constructor(
     fun release() {
         inferenceManager.close()
     }
+
+    fun getDownloadManager(): ModelDownloadManager = downloadManager
 
     class Builder(private val context: Context) {
         private var modelPath: String? = null

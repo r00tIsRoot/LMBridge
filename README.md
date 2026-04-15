@@ -78,6 +78,7 @@ lifecycleScope.launch {
 | `generateWithInput(input)` | Using MultimodalInput |
 | `stopGeneration()` | Cancel ongoing generation |
 | `release()` | Release resources |
+| `getDownloadManager()` | Get model download manager |
 
 ### GenerationResult
 
@@ -86,6 +87,21 @@ sealed class GenerationResult {
     data class Token(val text: String) : GenerationResult()  // streaming token
     data object Done : GenerationResult()                    // generation complete
     data class Error(val message: String) : GenerationResult()  // error occurred
+}
+```
+
+### ModelDownloadManager
+
+```kotlin
+sealed class DownloadStatus {
+    data object NotStarted : DownloadStatus()
+    data class Downloading(
+        val totalBytes: Long,
+        val receivedBytes: Long,
+        val progressPercent: Int
+    ) : DownloadStatus()
+    data class Failed(val message: String) : DownloadStatus()
+    data class Completed(val filePath: String) : DownloadStatus()
 }
 ```
 
@@ -183,6 +199,102 @@ To use a custom model path:
 val client = LMBridgeClient.Builder(context)
     .setModelPath("/sdcard/models/my-model.litertlm")
     .build()
+```
+
+## Model Download
+
+The SDK provides a download API to fetch models from HuggingFace with progress tracking.
+
+### Model Catalog
+
+Pre-defined model information is available in `ModelCatalog`:
+
+```kotlin
+import com.isroot.lmbridge.models.ModelCatalog
+
+// Available models:
+val gemma4E2B = ModelCatalog.GEMMA_4_E2B_IT   // 2.5GB
+val gemma4E4B = ModelCatalog.GEMMA_4_E4B_IT   // 3.6GB
+val gemma3nE2B = ModelCatalog.GEMMA_3N_E2B_IT // 3.6GB
+val gemma3nE4B = ModelCatalog.GEMMA_3N_E4B_IT // 4.9GB
+val gemma3_1B = ModelCatalog.GEMMA3_1B_IT     // 584MB
+val qwen2_5 = ModelCatalog.QWEN2_5_1_5B_INSTRUCT  // 1.6GB
+val deepseekR1 = ModelCatalog.DEEPSEEK_R1_DISTILL_QWEN_1_5B  // 1.8GB
+```
+
+### Download Model
+
+```kotlin
+val client = LMBridgeClient.Builder(context).build()
+val downloadManager = client.getDownloadManager()
+
+lifecycleScope.launch {
+    // Check if model is already downloaded
+    if (!downloadManager.isModelDownloaded(ModelCatalog.GEMMA_4_E2B_IT)) {
+        // Download with progress
+        downloadManager.downloadModel(ModelCatalog.GEMMA_4_E2B_IT)
+            .collect { status ->
+                when (status) {
+                    is ModelDownloadManager.DownloadStatus.NotStarted -> {
+                        println("Download started...")
+                    }
+                    is ModelDownloadManager.DownloadStatus.Downloading -> {
+                        println("Progress: ${status.progressPercent}%")
+                        println("Downloaded: ${status.receivedBytes / 1024 / 1024}MB / ${status.totalBytes / 1024 / 1024}MB")
+                    }
+                    is ModelDownloadManager.DownloadStatus.Completed -> {
+                        println("Downloaded to: ${status.filePath}")
+                    }
+                    is ModelDownloadManager.DownloadStatus.Failed -> {
+                        println("Failed: ${status.message}")
+                    }
+                }
+            }
+    }
+    
+    // Get downloaded model path
+    val modelPath = downloadManager.getModelPath(ModelCatalog.GEMMA_4_E2B_IT)
+    println("Model path: $modelPath")
+}
+```
+
+### Using Downloaded Model
+
+```kotlin
+lifecycleScope.launch {
+    val downloadManager = client.getDownloadManager()
+    val modelPath = downloadManager.getModelPath(ModelCatalog.GEMMA_4_E2B_IT)
+    
+    if (modelPath != null) {
+        // Create client with downloaded model
+        val inferenceClient = LMBridgeClient.Builder(context)
+            .setModelPath(modelPath)
+            .build()
+        
+        inferenceClient.initialize().collect { /* ... */ }
+    }
+}
+```
+
+### Custom Model Download
+
+You can also download models not in the catalog:
+
+```kotlin
+val customModel = ModelDownloadManager.ModelInfo(
+    modelId = "your-org/your-model",
+    modelFile = "model.litertlm",
+    commitHash = "abc123...",
+    sizeInBytes = 1000000000
+)
+
+downloadManager.downloadModel(customModel).collect { /* ... */ }
+```
+
+### Delete Downloaded Model
+
+```kotlin
+downloadManager.deleteModel(ModelCatalog.GEMMA_4_E2B_IT)
 ```
 
 ## Error Handling
