@@ -12,6 +12,26 @@ LMBridge는 Google's LiteRT-LM 엔진을 사용하여 온디바이스 LLM 추론
 - Kotlin 2.2.0
 - Gradle 8.10.2+
 
+## 로그 설정
+
+```kotlin
+// 빌드 전에 로그 레벨 설정
+// 0 = OFF, 1 = ERROR, 2 = WARN, 3 = DEBUG, 4 = VERBOSE
+LMBridge.setLogLevel(3)  // DEBUG 레벨로 설정
+
+// 또는 enum으로 직접 설정
+LMBridge.logLevel = LMBridge.LogLevel.DEBUG
+```
+
+**로그 레벨 설명:**
+| 레벨 | 설명 |
+|------|------|
+| OFF | 로그 출력 안함 |
+| ERROR | 오류 메시지만 |
+| WARN | 경고와 오류 |
+| DEBUG | 디버그, 경고, 오류 |
+| VERBOSE | 모든 로그 (상세 실행 정보 포함) |
+
 ## 설치
 
 ### 1. Maven Repository 추가
@@ -33,7 +53,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts (app)
 dependencies {
-    implementation("com.isroot:lmbridge:0.0.7")
+    implementation("com.isroot:lmbridge:0.0.8")
 }
 ```
 

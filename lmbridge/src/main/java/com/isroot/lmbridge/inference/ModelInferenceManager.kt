@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.ToolProvider
+import com.isroot.lmbridge.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -28,18 +29,33 @@ class ModelInferenceManager(
     private var currentConversation: Conversation? = null
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
+        Logger.d(TAG, "Initializing ModelInferenceManager...")
+        Logger.d(TAG, "modelPath parameter value: $modelPath")
+        Logger.d(TAG, "modelPath.isNullOrEmpty(): ${modelPath.isNullOrEmpty()}")
+
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
+            Logger.d(TAG, "Model path not provided, extracting asset: $DEFAULT_MODEL_FILE")
             extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
         } else {
-            modelPath
+            val modelFile = File(modelPath)
+            if (modelFile.exists()) {
+                Logger.d(TAG, "Using provided model path: $modelPath")
+                modelPath
+            } else {
+                Logger.w(TAG, "Provided model path does not exist: $modelPath, falling back to asset extraction")
+                extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
+            }
         }
 
+        Logger.d(TAG, "Creating engine with model: $finalModelPath")
         val engineConfig = EngineConfig(
             modelPath = finalModelPath,
             backend = Backend.NPU(),
         )
         engine = Engine(engineConfig).apply {
+            Logger.d(TAG, "Calling engine.initialize()")
             initialize()
+            Logger.d(TAG, "Engine initialized successfully")
         }
     }
 
@@ -66,22 +82,27 @@ class ModelInferenceManager(
             systemInstruction = Contents.of(systemInstruction),
         )
 
+        Logger.d(TAG, "Creating conversation for text generation")
         val conversation = engine.createConversation(config)
         currentConversation = conversation
+        Logger.d(TAG, "Sending message: $prompt")
 
         conversation.sendMessageAsync(
             Contents.of(prompt),
             object : MessageCallback {
                 override fun onMessage(message: Message) {
+                    Logger.v(TAG, "onMessage: $message")
                     trySend(GenerationResult.Token(message.toString()))
                 }
 
                 override fun onDone() {
+                    Logger.d(TAG, "Generation completed")
                     trySend(GenerationResult.Done)
                     close()
                 }
 
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Generation error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
@@ -89,6 +110,7 @@ class ModelInferenceManager(
         )
 
         awaitClose {
+            Logger.d(TAG, "Cancelling generation")
             conversation.cancelProcess()
         }
     }
@@ -105,6 +127,7 @@ class ModelInferenceManager(
             systemInstruction = Contents.of(systemInstruction),
         )
 
+        Logger.d(TAG, "Creating conversation for multimodal generation (${images.size} images)")
         val conversation = engine.createConversation(config)
         currentConversation = conversation
 
@@ -114,19 +137,23 @@ class ModelInferenceManager(
         }
         contents.add(Content.Text(prompt))
 
+        Logger.d(TAG, "Sending multimodal message")
         conversation.sendMessageAsync(
             Contents.of(contents),
             object : MessageCallback {
                 override fun onMessage(message: Message) {
+                    Logger.v(TAG, "onMessage: $message")
                     trySend(GenerationResult.Token(message.toString()))
                 }
 
                 override fun onDone() {
+                    Logger.d(TAG, "Multimodal generation completed")
                     trySend(GenerationResult.Done)
                     close()
                 }
 
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Multimodal generation error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
@@ -134,6 +161,7 @@ class ModelInferenceManager(
         )
 
         awaitClose {
+            Logger.d(TAG, "Cancelling multimodal generation")
             conversation.cancelProcess()
         }
     }
@@ -151,22 +179,27 @@ class ModelInferenceManager(
             tools = tools,
         )
 
+        Logger.d(TAG, "Creating conversation for tool calling (${tools.size} tools)")
         val conversation = engine.createConversation(config)
         currentConversation = conversation
 
+        Logger.d(TAG, "Sending message with tools")
         conversation.sendMessageAsync(
             Contents.of(prompt),
             object : MessageCallback {
                 override fun onMessage(message: Message) {
+                    Logger.v(TAG, "onMessage: $message")
                     trySend(GenerationResult.Token(message.toString()))
                 }
 
                 override fun onDone() {
+                    Logger.d(TAG, "Tool calling completed")
                     trySend(GenerationResult.Done)
                     close()
                 }
 
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Tool calling error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
@@ -174,20 +207,24 @@ class ModelInferenceManager(
         )
 
         awaitClose {
+            Logger.d(TAG, "Cancelling tool calling")
             conversation.cancelProcess()
         }
     }
 
     fun stopGeneration() {
+        Logger.d(TAG, "Stopping generation")
         currentConversation?.cancelProcess()
     }
 
     fun close() {
+        Logger.d(TAG, "Closing ModelInferenceManager")
         currentConversation?.close()
         engine?.close()
     }
 
     companion object {
+        private const val TAG = "ModelInferenceManager"
         private const val DEFAULT_MODEL_FILE = "gemma-4-E2B-it.litertlm"
         private const val DEFAULT_SYSTEM_INSTRUCTION = "You are a helpful AI assistant."
     }

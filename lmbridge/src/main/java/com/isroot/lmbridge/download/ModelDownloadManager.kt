@@ -1,7 +1,7 @@
 package com.isroot.lmbridge.download
 
 import android.content.Context
-import android.util.Log
+import com.isroot.lmbridge.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -78,16 +78,18 @@ class ModelDownloadManager(private val context: Context) {
         modelInfo: ModelInfo,
         accessToken: String? = null,
     ): Flow<DownloadStatus> = flow {
+        Logger.d(TAG, "Starting download: ${modelInfo.modelId}")
         emit(DownloadStatus.NotStarted)
 
         val downloadUrl = modelInfo.toDownloadUrl()
         val dirName = modelInfo.toDirName()
+        Logger.d(TAG, "Download URL: $downloadUrl")
 
         try {
             val url = URL(downloadUrl)
+            Logger.d(TAG, "Opening connection...")
             val connection = url.openConnection() as HttpURLConnection
 
-            // Set headers
             connection.connectTimeout = 30000
             connection.readTimeout = 30000
             connection.setRequestProperty("Accept-Encoding", "identity")
@@ -96,9 +98,11 @@ class ModelDownloadManager(private val context: Context) {
                 connection.setRequestProperty("Authorization", "Bearer $accessToken")
             }
 
+            Logger.d(TAG, "Connecting to server...")
             connection.connect()
 
             val responseCode = connection.responseCode
+            Logger.d(TAG, "HTTP response: $responseCode")
             if (responseCode != HttpURLConnection.HTTP_OK &&
                 responseCode != HttpURLConnection.HTTP_PARTIAL
             ) {
@@ -124,10 +128,12 @@ class ModelDownloadManager(private val context: Context) {
 
             if (downloadedBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
                 connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
-                Log.d(TAG, "Resuming download from byte $downloadedBytes")
+                Logger.d(TAG, "Resuming download from byte $downloadedBytes")
             }
 
+            Logger.d(TAG, "Total size: $totalBytes bytes")
             val inputStream = connection.inputStream
+            Logger.d(TAG, "Starting download to: ${outputFile.absolutePath}")
             val outputStream = FileOutputStream(outputFile, downloadedBytes > 0)
 
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -137,13 +143,13 @@ class ModelDownloadManager(private val context: Context) {
                 outputStream.write(buffer, 0, bytesRead)
                 downloadedBytes += bytesRead
 
-                // Emit progress
                 val progress = if (totalBytes > 0) {
                     ((downloadedBytes * 100) / totalBytes).toInt()
                 } else {
                     0
                 }
 
+                Logger.v(TAG, "Progress: $progress% ($downloadedBytes / $totalBytes)")
                 emit(
                     DownloadStatus.Downloading(
                         totalBytes = totalBytes,
@@ -153,13 +159,15 @@ class ModelDownloadManager(private val context: Context) {
                 )
             }
 
+            Logger.d(TAG, "Download complete, closing streams")
             outputStream.close()
             inputStream.close()
             connection.disconnect()
 
+            Logger.d(TAG, "Download completed: ${outputFile.absolutePath}")
             emit(DownloadStatus.Completed(outputFile.absolutePath))
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed", e)
+            Logger.e(TAG, "Download failed", e)
             emit(DownloadStatus.Failed(e.message ?: "Unknown error"))
         }
     }.flowOn(Dispatchers.IO)
@@ -202,7 +210,7 @@ class ModelDownloadManager(private val context: Context) {
             val outputDir = File(context.getExternalFilesDir(null), dirName)
             outputDir.deleteRecursively()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to delete model", e)
+            Logger.e(TAG, "Failed to delete model", e)
             false
         }
     }
