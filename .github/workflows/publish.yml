@@ -1,0 +1,48 @@
+name: Publish to GitHub Pages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Publish to local repository
+        run: ./gradlew :lmbridge:publishReleasePublicationToLocalRepository
+
+      - name: Checkout Maven repository
+        uses: actions/checkout@v4
+        with:
+          repository: r00tIsRoot/packages
+          path: maven-repo
+          ref: gh-pages
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy published files
+        run: |
+          mkdir -p maven-repo/com/isroot/lmbridge/${{ github.ref_name }}
+          cp -r lmbridge/build/repo/com/isroot/lmbridge/${{ github.ref_name }}/* maven-repo/com/isroot/lmbridge/${{ github.ref_name }}/
+
+      - name: Commit and push
+        working-directory: maven-repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git diff --staged --quiet || git commit -m "Release ${{ github.ref_name }}"
+          git push
