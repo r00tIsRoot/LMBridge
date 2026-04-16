@@ -22,7 +22,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Publish to local repository
-        run: ./gradlew :lmbridge:publishReleasePublicationToLocalRepository
+        run: ./gradlew clean :lmbridge:publishReleasePublicationToLocalRepository --no-daemon
+
+      - name: Find published directory
+        id: find-dir
+        run: |
+          find lmbridge/build/repo -name "*.aar" -type f | head -1 | xargs dirname | xargs basename
+          echo "dir_name=$(find lmbridge/build/repo -name '*.aar' -type f | head -1 | xargs dirname | xargs basename)" >> $GITHUB_OUTPUT
 
       - name: Checkout Maven repository
         uses: actions/checkout@v4
@@ -35,14 +41,23 @@ jobs:
 
       - name: Copy published files
         run: |
-          mkdir -p maven-repo/com/isroot/lmbridge/${{ github.ref_name }}
-          cp -r lmbridge/build/repo/com/isroot/lmbridge/${{ github.ref_name }}/* maven-repo/com/isroot/lmbridge/${{ github.ref_name }}/
+          VERSION_DIR=$(find lmbridge/build/repo/com/isroot/lmbridge -maxdepth 1 -type d | grep -v "com.isroot" | tail -1 | xargs basename)
+          if [ -z "$VERSION_DIR" ]; then
+            VERSION_DIR="${{ github.ref_name }}"
+          fi
+          echo "Publishing version: $VERSION_DIR"
+          mkdir -p maven-repo/com/isroot/lmbridge/$VERSION_DIR
+          cp -r lmbridge/build/repo/com/isroot/lmbridge/$VERSION_DIR/* maven-repo/com/isroot/lmbridge/$VERSION_DIR/
 
       - name: Commit and push
         working-directory: maven-repo
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          VERSION_TAG="${{ github.ref_name }}"
+          if [[ "$VERSION_TAG" == v* ]]; then
+            VERSION_TAG="${VERSION_TAG#v}"
+          fi
           git add .
-          git diff --staged --quiet || git commit -m "Release ${{ github.ref_name }}"
+          git diff --staged --quiet || git commit -m "Release v$VERSION_TAG"
           git push
