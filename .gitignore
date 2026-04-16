@@ -3,7 +3,7 @@
 /build/
 /lmbridge/build/
 
-.idea/
+.idea/*
 local.properties
 *.litertlm
 build/
