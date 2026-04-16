@@ -28,10 +28,11 @@ jobs:
       - name: Publish to local repository
         run: ./gradlew clean :lmbridge:publishReleasePublicationToLocalRepository --no-daemon
 
-      - name: Get version from build.gradle.kts
+      - name: Get version from published POM
         id: version
         run: |
-          VERSION=$(grep -E '^\s*version\s*=' lmbridge/build.gradle.kts | sed 's/.*version\s*=\s*["'\'']\([^"'\'']*\)["'\''].*/\1/')
+          VERSION=$(ls lmbridge/build/repo/com/isroot/lmbridge/ | grep -E '^[0-9]' | head -1)
+          echo "Found version in repo: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Checkout Maven repository
