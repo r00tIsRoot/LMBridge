@@ -24,12 +24,6 @@ jobs:
       - name: Publish to local repository
         run: ./gradlew clean :lmbridge:publishReleasePublicationToLocalRepository --no-daemon
 
-      - name: Find published directory
-        id: find-dir
-        run: |
-          find lmbridge/build/repo -name "*.aar" -type f | head -1 | xargs dirname | xargs basename
-          echo "dir_name=$(find lmbridge/build/repo -name '*.aar' -type f | head -1 | xargs dirname | xargs basename)" >> $GITHUB_OUTPUT
-
       - name: Checkout Maven repository
         uses: actions/checkout@v4
         with:
@@ -41,13 +35,15 @@ jobs:
 
       - name: Copy published files
         run: |
-          VERSION_DIR=$(find lmbridge/build/repo/com/isroot/lmbridge -maxdepth 1 -type d | grep -v "com.isroot" | tail -1 | xargs basename)
-          if [ -z "$VERSION_DIR" ]; then
-            VERSION_DIR="${{ github.ref_name }}"
+          VERSION_TAG="${{ github.ref_name }}"
+          if [[ "$VERSION_TAG" == v* ]]; then
+            VERSION="${VERSION_TAG#v}"
+          else
+            VERSION="$VERSION_TAG"
           fi
-          echo "Publishing version: $VERSION_DIR"
-          mkdir -p maven-repo/com/isroot/lmbridge/$VERSION_DIR
-          cp -r lmbridge/build/repo/com/isroot/lmbridge/$VERSION_DIR/* maven-repo/com/isroot/lmbridge/$VERSION_DIR/
+          echo "Publishing version: $VERSION"
+          mkdir -p maven-repo/com/isroot/lmbridge/$VERSION
+          cp -r lmbridge/build/repo/com/isroot/lmbridge/* maven-repo/com/isroot/lmbridge/$VERSION/
 
       - name: Commit and push
         working-directory: maven-repo
