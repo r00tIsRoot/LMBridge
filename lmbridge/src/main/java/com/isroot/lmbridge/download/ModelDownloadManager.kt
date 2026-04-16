@@ -5,7 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flowOn
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -83,88 +83,86 @@ class ModelDownloadManager(private val context: Context) {
         val downloadUrl = modelInfo.toDownloadUrl()
         val dirName = modelInfo.toDirName()
 
-        withContext(Dispatchers.IO) {
-            try {
-                val url = URL(downloadUrl)
-                val connection = url.openConnection() as HttpURLConnection
+        try {
+            val url = URL(downloadUrl)
+            val connection = url.openConnection() as HttpURLConnection
 
-                // Set headers
-                connection.connectTimeout = 30000
-                connection.readTimeout = 30000
-                connection.setRequestProperty("Accept-Encoding", "identity")
+            // Set headers
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
+            connection.setRequestProperty("Accept-Encoding", "identity")
 
-                if (accessToken != null) {
-                    connection.setRequestProperty("Authorization", "Bearer $accessToken")
-                }
-
-                connection.connect()
-
-                val responseCode = connection.responseCode
-                if (responseCode != HttpURLConnection.HTTP_OK &&
-                    responseCode != HttpURLConnection.HTTP_PARTIAL
-                ) {
-                    throw Exception("HTTP error: $responseCode")
-                }
-
-                // Get total size
-                val totalBytes = if (modelInfo.sizeInBytes > 0) {
-                    modelInfo.sizeInBytes
-                } else {
-                    connection.contentLength.toLong().coerceAtLeast(0L)
-                }
-
-                // Prepare output directory
-                val outputDir = File(context.getExternalFilesDir(null), dirName)
-                if (!outputDir.exists()) {
-                    outputDir.mkdirs()
-                }
-
-                // Check for partial download
-                val outputFile = File(outputDir, modelInfo.modelFile)
-                var downloadedBytes = outputFile.length()
-
-                if (downloadedBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
-                    connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
-                    Log.d(TAG, "Resuming download from byte $downloadedBytes")
-                }
-
-                val inputStream = connection.inputStream
-                val outputStream = FileOutputStream(outputFile, downloadedBytes > 0)
-
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var bytesRead: Int
-
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                    downloadedBytes += bytesRead
-
-                    // Emit progress
-                    val progress = if (totalBytes > 0) {
-                        ((downloadedBytes * 100) / totalBytes).toInt()
-                    } else {
-                        0
-                    }
-
-                    emit(
-                        DownloadStatus.Downloading(
-                            totalBytes = totalBytes,
-                            receivedBytes = downloadedBytes,
-                            progressPercent = progress,
-                        ),
-                    )
-                }
-
-                outputStream.close()
-                inputStream.close()
-                connection.disconnect()
-
-                emit(DownloadStatus.Completed(outputFile.absolutePath))
-            } catch (e: Exception) {
-                Log.e(TAG, "Download failed", e)
-                emit(DownloadStatus.Failed(e.message ?: "Unknown error"))
+            if (accessToken != null) {
+                connection.setRequestProperty("Authorization", "Bearer $accessToken")
             }
+
+            connection.connect()
+
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK &&
+                responseCode != HttpURLConnection.HTTP_PARTIAL
+            ) {
+                throw Exception("HTTP error: $responseCode")
+            }
+
+            // Get total size
+            val totalBytes = if (modelInfo.sizeInBytes > 0) {
+                modelInfo.sizeInBytes
+            } else {
+                connection.contentLength.toLong().coerceAtLeast(0L)
+            }
+
+            // Prepare output directory
+            val outputDir = File(context.getExternalFilesDir(null), dirName)
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+
+            // Check for partial download
+            val outputFile = File(outputDir, modelInfo.modelFile)
+            var downloadedBytes = outputFile.length()
+
+            if (downloadedBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
+                Log.d(TAG, "Resuming download from byte $downloadedBytes")
+            }
+
+            val inputStream = connection.inputStream
+            val outputStream = FileOutputStream(outputFile, downloadedBytes > 0)
+
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var bytesRead: Int
+
+            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+                downloadedBytes += bytesRead
+
+                // Emit progress
+                val progress = if (totalBytes > 0) {
+                    ((downloadedBytes * 100) / totalBytes).toInt()
+                } else {
+                    0
+                }
+
+                emit(
+                    DownloadStatus.Downloading(
+                        totalBytes = totalBytes,
+                        receivedBytes = downloadedBytes,
+                        progressPercent = progress,
+                    ),
+                )
+            }
+
+            outputStream.close()
+            inputStream.close()
+            connection.disconnect()
+
+            emit(DownloadStatus.Completed(outputFile.absolutePath))
+        } catch (e: Exception) {
+            Log.e(TAG, "Download failed", e)
+            emit(DownloadStatus.Failed(e.message ?: "Unknown error"))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Check if a model is already downloaded.

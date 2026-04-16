@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.isroot.lmbridge"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
@@ -50,7 +50,7 @@ afterEvaluate {
             create<MavenPublication>("release") {
                 groupId = "com.isroot"
                 artifactId = "lmbridge"
-                version = "0.0.7"
+                version = "0.0.8"
 
                 from(components["release"])
 
