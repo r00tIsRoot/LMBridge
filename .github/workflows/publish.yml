@@ -28,6 +28,12 @@ jobs:
       - name: Publish to local repository
         run: ./gradlew clean :lmbridge:publishReleasePublicationToLocalRepository --no-daemon
 
+      - name: Get version from build.gradle.kts
+        id: version
+        run: |
+          VERSION=$(grep -E '^\s*version\s*=' lmbridge/build.gradle.kts | sed 's/.*version\s*=\s*["'\'']\([^"'\'']*\)["'\''].*/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Checkout Maven repository
         uses: actions/checkout@v4
         with:
@@ -39,12 +45,7 @@ jobs:
 
       - name: Copy published files
         run: |
-          VERSION_TAG="${{ github.ref_name }}"
-          if [[ "$VERSION_TAG" == v* ]]; then
-            VERSION="${VERSION_TAG#v}"
-          else
-            VERSION="$VERSION_TAG"
-          fi
+          VERSION="${{ steps.version.outputs.VERSION }}"
           echo "Publishing version: $VERSION"
           mkdir -p maven-repo/com/isroot/lmbridge/$VERSION
           cp -r lmbridge/build/repo/com/isroot/lmbridge/* maven-repo/com/isroot/lmbridge/$VERSION/
@@ -54,10 +55,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          VERSION_TAG="${{ github.ref_name }}"
-          if [[ "$VERSION_TAG" == v* ]]; then
-            VERSION_TAG="${VERSION_TAG#v}"
-          fi
+          VERSION="${{ steps.version.outputs.VERSION }}"
           git add .
-          git diff --staged --quiet || git commit -m "Release v$VERSION_TAG"
+          git diff --staged --quiet || git commit -m "Release v$VERSION"
           git push
