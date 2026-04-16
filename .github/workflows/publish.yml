@@ -35,7 +35,7 @@ jobs:
           path: maven-repo
           ref: gh-pages
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Copy published files
         run: |
