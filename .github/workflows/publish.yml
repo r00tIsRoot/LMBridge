@@ -48,7 +48,7 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           echo "Publishing version: $VERSION"
           mkdir -p maven-repo/com/isroot/lmbridge/$VERSION
-          cp -r lmbridge/build/repo/com/isroot/lmbridge/* maven-repo/com/isroot/lmbridge/$VERSION/
+          cp -r lmbridge/build/repo/com/isroot/lmbridge/$VERSION/* maven-repo/com/isroot/lmbridge/$VERSION/
 
       - name: Commit and push
         working-directory: maven-repo
