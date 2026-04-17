@@ -1,22 +1,23 @@
 package com.isroot.lmbridge
 
 import android.util.Log
+import com.google.ai.edge.litertlm.Backend as LiteRtBackend
 
-/**
- * LMBridge SDK configuration.
- *
- * This class provides global configuration for the SDK including logging levels.
- */
+fun convertToLiteRtBackend(backend: LMBridge.Backend): LiteRtBackend {
+    return when (backend) {
+        LMBridge.Backend.CPU -> LiteRtBackend.CPU()
+        LMBridge.Backend.GPU -> LiteRtBackend.GPU()
+        LMBridge.Backend.NPU -> LiteRtBackend.NPU()
+    }
+}
+
 object LMBridge {
-    /**
-     * Log level for SDK debugging.
-     *
-     * - OFF: No logs
-     * - ERROR: Error messages only
-     * - WARN: Warnings and errors
-     * - DEBUG: Debug, warnings, and errors
-     * - VERBOSE: All logs including detailed execution info
-     */
+    enum class Backend {
+        CPU,
+        GPU,
+        NPU,
+    }
+
     enum class LogLevel {
         OFF,
         ERROR,

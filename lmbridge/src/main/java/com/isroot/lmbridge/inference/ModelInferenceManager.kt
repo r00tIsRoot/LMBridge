@@ -12,7 +12,9 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.ToolProvider
+import com.isroot.lmbridge.LMBridge
 import com.isroot.lmbridge.Logger
+import com.isroot.lmbridge.convertToLiteRtBackend
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -24,7 +26,7 @@ import java.io.FileOutputStream
 class ModelInferenceManager(
     private val context: Context,
     private val modelPath: String? = null,
-    private val backend: Backend = Backend.NPU(),
+    private val backend: LMBridge.Backend = LMBridge.Backend.NPU,
 ) {
     private var engine: Engine? = null
     private var currentConversation: Conversation? = null
@@ -52,7 +54,7 @@ class ModelInferenceManager(
         Logger.d(TAG, "Creating engine with model: $finalModelPath, backend: $backend")
         val engineConfig = EngineConfig(
             modelPath = finalModelPath,
-            backend = backend,
+            backend = convertToLiteRtBackend(backend),
         )
         engine = Engine(engineConfig).apply {
             Logger.d(TAG, "Calling engine.initialize()")
