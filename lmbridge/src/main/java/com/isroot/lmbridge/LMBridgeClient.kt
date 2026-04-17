@@ -2,6 +2,7 @@ package com.isroot.lmbridge
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ToolProvider
 import com.isroot.lmbridge.download.ModelDownloadManager
 import com.isroot.lmbridge.inference.GenerationResult
@@ -12,8 +13,9 @@ import kotlinx.coroutines.flow.Flow
 class LMBridgeClient private constructor(
     private val context: Context,
     private val modelPath: String? = null,
+    private val backend: Backend = Backend.NPU(),
 ) {
-    private val inferenceManager = ModelInferenceManager(context, modelPath)
+    private val inferenceManager = ModelInferenceManager(context, modelPath, backend)
     private val downloadManager = ModelDownloadManager(context)
 
     suspend fun initialize() {
@@ -60,14 +62,20 @@ class LMBridgeClient private constructor(
 
     class Builder(private val context: Context) {
         private var modelPath: String? = null
+        private var backend: Backend = Backend.NPU()
 
         fun setModelPath(path: String): Builder {
             modelPath = path
             return this
         }
 
+        fun setBackend(backend: Backend): Builder {
+            this.backend = backend
+            return this
+        }
+
         fun build(): LMBridgeClient {
-            return LMBridgeClient(context, modelPath)
+            return LMBridgeClient(context, modelPath, backend)
         }
     }
 }

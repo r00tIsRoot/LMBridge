@@ -24,6 +24,7 @@ import java.io.FileOutputStream
 class ModelInferenceManager(
     private val context: Context,
     private val modelPath: String? = null,
+    private val backend: Backend = Backend.NPU(),
 ) {
     private var engine: Engine? = null
     private var currentConversation: Conversation? = null
@@ -32,6 +33,7 @@ class ModelInferenceManager(
         Logger.d(TAG, "Initializing ModelInferenceManager...")
         Logger.d(TAG, "modelPath parameter value: $modelPath")
         Logger.d(TAG, "modelPath.isNullOrEmpty(): ${modelPath.isNullOrEmpty()}")
+        Logger.d(TAG, "backend: $backend")
 
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
             Logger.d(TAG, "Model path not provided, extracting asset: $DEFAULT_MODEL_FILE")
@@ -47,10 +49,10 @@ class ModelInferenceManager(
             }
         }
 
-        Logger.d(TAG, "Creating engine with model: $finalModelPath")
+        Logger.d(TAG, "Creating engine with model: $finalModelPath, backend: $backend")
         val engineConfig = EngineConfig(
             modelPath = finalModelPath,
-            backend = Backend.NPU(),
+            backend = backend,
         )
         engine = Engine(engineConfig).apply {
             Logger.d(TAG, "Calling engine.initialize()")

@@ -53,7 +53,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts (app)
 dependencies {
-    implementation("com.isroot:lmbridge:0.0.8")
+    implementation("com.isroot:lmbridge:0.0.11")
 }
 ```
 
