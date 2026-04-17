@@ -13,6 +13,15 @@
 !.idea/misc.xml
 !.idea/runConfigurations.xml
 !.idea/vcs.xml
+.idea/.gitignore
+.idea/AndroidProjectSystem.xml
+.idea/caches/
+.idea/compiler.xml
+.idea/gradle.xml
+.idea/migrations.xml
+.idea/misc.xml
+.idea/runConfigurations.xml
+.idea/vcs.xml
 
 local.properties
 *.litertlm
