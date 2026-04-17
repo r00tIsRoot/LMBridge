@@ -2,7 +2,6 @@ package com.isroot.lmbridge.inference
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
@@ -81,48 +80,19 @@ class ModelInferenceManager(
     fun generate(
         prompt: String,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = callbackFlow {
-        val engine = this@ModelInferenceManager.engine
-            ?: throw IllegalStateException("Engine not initialized")
-
-        val config = ConversationConfig(
-            systemInstruction = Contents.of(systemInstruction),
-        )
-
-        Logger.d(TAG, "Creating conversation for text generation")
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        Logger.d(TAG, "Sending message: $prompt")
-
-        conversation.sendMessageAsync(
-            Contents.of(prompt),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    Logger.v(TAG, "onMessage: $message")
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-
-                override fun onDone() {
-                    Logger.d(TAG, "Generation completed")
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Generation error", throwable)
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-
-        awaitClose {
-            Logger.d(TAG, "Cancelling generation")
-            conversation.cancelProcess()
-        }
-    }
+    ): Flow<GenerationResult> = processChunkedGenerate(prompt, systemInstruction)
 
     fun generateWithTexts(
+        texts: List<String>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = generateSingle(texts, systemInstruction)
+
+    private fun generateSingle(
+        prompt: String,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = generateSingle(listOf(prompt), systemInstruction)
+
+    private fun generateSingle(
         texts: List<String>,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
     ): Flow<GenerationResult> = callbackFlow {
@@ -274,6 +244,114 @@ class ModelInferenceManager(
         Logger.d(TAG, "Closing ModelInferenceManager")
         currentConversation?.close()
         engine?.close()
+    }
+
+    private fun estimateTokenCount(text: String): Int {
+        val koreanChars = text.count { it.code in 0xAC00..0xD7A3 }
+        val otherChars = text.length - koreanChars
+        return koreanChars / 2 + otherChars / 4
+    }
+
+    private fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
+        val estimatedTokens = estimateTokenCount(text)
+        if (estimatedTokens <= maxTokens) {
+            return listOf(text)
+        }
+
+        val chunks = mutableListOf<String>()
+        val lines = text.split("\n")
+        val currentChunk = StringBuilder()
+        var currentTokens = 0
+
+        for (line in lines) {
+            val lineTokens = estimateTokenCount(line)
+            if (currentTokens + lineTokens > maxTokens && currentChunk.isNotEmpty()) {
+                chunks.add(currentChunk.toString().trim())
+                currentChunk.clear()
+                currentTokens = 0
+            }
+            currentChunk.appendLine(line)
+            currentTokens += lineTokens
+        }
+
+        if (currentChunk.isNotEmpty()) {
+            chunks.add(currentChunk.toString().trim())
+        }
+
+        Logger.d(TAG, "Split into ${chunks.size} chunks, maxTokens: $maxTokens")
+        return chunks
+    }
+
+    private fun processChunkedGenerate(
+        prompt: String,
+        systemInstruction: String,
+    ): Flow<GenerationResult> = callbackFlow {
+        val chunks = splitByTokenLimit(prompt, maxNumTokens)
+
+        if (chunks.size == 1) {
+            generateSingle(prompt, systemInstruction).collect { result ->
+                trySend(result)
+            }
+        } else {
+            trySend(GenerationResult.Token("Processing ${chunks.size} chunks...\n"))
+
+            for ((index, chunk) in chunks.withIndex()) {
+                Logger.d(TAG, "Processing chunk ${index + 1}/${chunks.size}, tokens: ${estimateTokenCount(chunk)}")
+
+                trySend(GenerationResult.Token("\n--- Chunk ${index + 1}/${chunks.size} ---\n"))
+
+                generateSingle(chunk, systemInstruction).collect { result ->
+                    when (result) {
+                        is GenerationResult.Token -> trySend(result)
+                        is GenerationResult.Done -> { }
+                        is GenerationResult.Error -> {
+                            trySend(result)
+                        }
+                    }
+                }
+            }
+
+            trySend(GenerationResult.Done)
+            close()
+        }
+    }
+
+    fun generateWithFiles(
+        prompt: String,
+        filePaths: List<String>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> {
+        val fileContents = filePaths.mapNotNull { path ->
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    Logger.d(TAG, "Reading file: $path (${file.length()} bytes)")
+                    file.readText()
+                } else {
+                    Logger.w(TAG, "File not found: $path")
+                    null
+                }
+            } catch (e: Exception) {
+                Logger.e(TAG, "Failed to read file: $path", e)
+                null
+            }
+        }
+
+        val contextPrompt = if (fileContents.isNotEmpty()) {
+            """
+            |Based on the following document content, answer the question.
+            |
+            |Document content:
+            |${fileContents.joinToString("\n\n---\n\n")}
+            |
+            |Question: $prompt
+            """.trimMargin()
+        } else {
+            prompt
+        }
+
+        Logger.d(TAG, "generateWithFiles: ${filePaths.size} files, prompt length: ${contextPrompt.length}")
+        return processChunkedGenerate(contextPrompt, systemInstruction)
     }
 
     companion object {

@@ -30,6 +30,13 @@ class LMBridgeClient private constructor(
         return inferenceManager.generateWithImages(prompt, images)
     }
 
+    fun generateWithFiles(
+        prompt: String,
+        filePaths: List<String>,
+    ): Flow<GenerationResult> {
+        return inferenceManager.generateWithFiles(prompt, filePaths)
+    }
+
     fun generateWithTools(
         prompt: String,
         tools: List<ToolProvider>,
