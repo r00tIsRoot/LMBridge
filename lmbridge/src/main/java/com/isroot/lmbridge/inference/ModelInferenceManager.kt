@@ -27,6 +27,7 @@ class ModelInferenceManager(
     private val context: Context,
     private val modelPath: String? = null,
     private val backend: LMBridge.Backend = LMBridge.Backend.NPU,
+    private val maxNumTokens: Int = 8192,
 ) {
     private var engine: Engine? = null
     private var currentConversation: Conversation? = null
@@ -36,6 +37,7 @@ class ModelInferenceManager(
         Logger.d(TAG, "modelPath parameter value: $modelPath")
         Logger.d(TAG, "modelPath.isNullOrEmpty(): ${modelPath.isNullOrEmpty()}")
         Logger.d(TAG, "backend: $backend")
+        Logger.d(TAG, "maxNumTokens: $maxNumTokens")
 
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
             Logger.d(TAG, "Model path not provided, extracting asset: $DEFAULT_MODEL_FILE")
@@ -51,10 +53,11 @@ class ModelInferenceManager(
             }
         }
 
-        Logger.d(TAG, "Creating engine with model: $finalModelPath, backend: $backend")
+        Logger.d(TAG, "Creating engine with model: $finalModelPath, backend: $backend, maxNumTokens: $maxNumTokens")
         val engineConfig = EngineConfig(
             modelPath = finalModelPath,
             backend = convertToLiteRtBackend(backend),
+            maxNumTokens = maxNumTokens,
         )
         engine = Engine(engineConfig).apply {
             Logger.d(TAG, "Calling engine.initialize()")
@@ -93,6 +96,52 @@ class ModelInferenceManager(
 
         conversation.sendMessageAsync(
             Contents.of(prompt),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    Logger.v(TAG, "onMessage: $message")
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+
+                override fun onDone() {
+                    Logger.d(TAG, "Generation completed")
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Generation error", throwable)
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+
+        awaitClose {
+            Logger.d(TAG, "Cancelling generation")
+            conversation.cancelProcess()
+        }
+    }
+
+    fun generateWithTexts(
+        texts: List<String>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val engine = this@ModelInferenceManager.engine
+            ?: throw IllegalStateException("Engine not initialized")
+
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
+        )
+
+        Logger.d(TAG, "Creating conversation for text generation with ${texts.size} text contents")
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+
+        val contents = texts.map { Content.Text(it) }
+        Logger.d(TAG, "Sending ${contents.size} text contents")
+
+        conversation.sendMessageAsync(
+            Contents.of(contents),
             object : MessageCallback {
                 override fun onMessage(message: Message) {
                     Logger.v(TAG, "onMessage: $message")

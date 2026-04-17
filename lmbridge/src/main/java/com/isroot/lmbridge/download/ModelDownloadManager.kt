@@ -126,9 +126,15 @@ class ModelDownloadManager(private val context: Context) {
             val outputFile = File(outputDir, modelInfo.modelFile)
             var downloadedBytes = outputFile.length()
 
-            if (downloadedBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
+            val supportsResume = downloadedBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
+
+            if (supportsResume) {
                 connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
                 Logger.d(TAG, "Resuming download from byte $downloadedBytes")
+            } else if (downloadedBytes > 0) {
+                Logger.d(TAG, "Previous download incomplete, restarting from beginning")
+                outputFile.delete()
+                downloadedBytes = 0
             }
 
             Logger.d(TAG, "Total size: $totalBytes bytes")
@@ -164,7 +170,15 @@ class ModelDownloadManager(private val context: Context) {
             inputStream.close()
             connection.disconnect()
 
-            Logger.d(TAG, "Download completed: ${outputFile.absolutePath}")
+            val actualSize = outputFile.length()
+            Logger.d(TAG, "Download completed: ${outputFile.absolutePath}, size: $actualSize bytes")
+
+            if (totalBytes > 0 && actualSize != totalBytes) {
+                Logger.w(TAG, "File size mismatch: expected $totalBytes, got $actualSize")
+                outputFile.delete()
+                throw Exception("Downloaded file size mismatch: expected $totalBytes, got $actualSize")
+            }
+
             emit(DownloadStatus.Completed(outputFile.absolutePath))
         } catch (e: Exception) {
             Logger.e(TAG, "Download failed", e)

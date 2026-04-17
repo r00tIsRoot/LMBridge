@@ -13,8 +13,9 @@ class LMBridgeClient private constructor(
     private val context: Context,
     private val modelPath: String? = null,
     private val backend: LMBridge.Backend = LMBridge.Backend.NPU,
+    private val maxNumTokens: Int = 8192,
 ) {
-    private val inferenceManager = ModelInferenceManager(context, modelPath, backend)
+    private val inferenceManager = ModelInferenceManager(context, modelPath, backend, maxNumTokens)
     private val downloadManager = ModelDownloadManager(context)
 
     suspend fun initialize() {
@@ -40,12 +41,18 @@ class LMBridgeClient private constructor(
         val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
         val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
 
-        return if (images.isNotEmpty()) {
-            val prompt = texts.joinToString(" ") { it.text }
-            inferenceManager.generateWithImages(prompt, images.map { it.bitmap })
-        } else {
-            val prompt = texts.joinToString(" ") { it.text }
-            inferenceManager.generate(prompt)
+        return when {
+            images.isNotEmpty() -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generateWithImages(prompt, images.map { it.bitmap })
+            }
+            texts.size > 1 -> {
+                inferenceManager.generateWithTexts(texts.map { it.text })
+            }
+            else -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generate(prompt)
+            }
         }
     }
 
@@ -62,6 +69,7 @@ class LMBridgeClient private constructor(
     class Builder(private val context: Context) {
         private var modelPath: String? = null
         private var backend: LMBridge.Backend = LMBridge.Backend.NPU
+        private var maxNumTokens: Int = 8192
 
         fun setModelPath(path: String): Builder {
             modelPath = path
@@ -73,8 +81,13 @@ class LMBridgeClient private constructor(
             return this
         }
 
+        fun setMaxNumTokens(maxNumTokens: Int): Builder {
+            this.maxNumTokens = maxNumTokens
+            return this
+        }
+
         fun build(): LMBridgeClient {
-            return LMBridgeClient(context, modelPath, backend)
+            return LMBridgeClient(context, modelPath, backend, maxNumTokens)
         }
     }
 }

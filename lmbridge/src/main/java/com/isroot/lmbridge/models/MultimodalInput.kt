@@ -17,5 +17,12 @@ data class MultimodalInput(
         fun textAndImages(prompt: String, images: List<Bitmap>) = MultimodalInput(
             images.map { MultimodalContent.Image(it) } + MultimodalContent.Text(prompt),
         )
+
+        fun textWithContent(instruction: String, content: String) = MultimodalInput(
+            listOf(
+                MultimodalContent.Text(instruction),
+                MultimodalContent.Text(content),
+            ),
+        )
     }
 }
