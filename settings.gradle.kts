@@ -14,4 +14,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LMBridge"
+include(":shared")
 include(":lmbridge")

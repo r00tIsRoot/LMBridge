@@ -1,0 +1,3 @@
+headers = litert_lm.h
+package = com.isroot.lmbridge.litert
+linkerOpts = -lLiteRtLM
