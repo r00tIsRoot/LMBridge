@@ -25,7 +25,7 @@ import java.io.FileOutputStream
 class ModelInferenceManager(
     private val context: Context,
     private val modelPath: String? = null,
-    private val backend: LMBridge.Backend = LMBridge.Backend.NPU,
+    private val backend: LMBridge.Backend = LMBridge.Backend.CPU,
     private val maxNumTokens: Int = 8192,
 ) {
     private var engine: Engine? = null
