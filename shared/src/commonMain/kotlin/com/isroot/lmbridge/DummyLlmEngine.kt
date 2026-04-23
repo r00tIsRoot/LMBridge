@@ -4,11 +4,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 class DummyLlmEngine : LlmEngine {
-    override suspend fun initialize() {}
-    override suspend fun createConversation(): Conversation = Conversation("dummy", emptyList())
-    override fun sendMessage(conversationId: String, content: String): Flow<GenerationResult> = flow {
+    constructor() : super()
+    
+    override suspend fun performInitialize() {
+    }
+    
+    override fun performSendMessage(content: String, systemInstruction: String): Flow<GenerationResult> = flow {
         emit(GenerationResult.Error("Not implemented on this platform"))
     }
-    override suspend fun getConversations(): List<Conversation> = emptyList()
-    override suspend fun shutdown() {}
+    
+    override suspend fun performShutdown() {
+    }
 }
