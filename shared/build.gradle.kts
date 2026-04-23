@@ -2,7 +2,6 @@ plugins {
     kotlin("multiplatform")
     kotlin("plugin.serialization") version "2.2.0"
     id("com.android.library")
-    id("maven-publish")
 }
 
 version = "0.1.1"
@@ -66,7 +65,7 @@ kotlin {
             }
         }
         val iosMain by creating {
-            // Removed dependsOn(commonMain) to comply with Default Kotlin Hierarchy Template
+            dependsOn(commonMain)
         }
     }
 }
@@ -80,18 +79,5 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("release") {
-            groupId = "com.isroot"
-            artifactId = "lmbridge"
-            version = project.version.toString()
-            
-            // KMP publishing usually handles artifacts automatically via the kotlin-multiplatform plugin
-            // but we define the publication name as 'release' to match the Action's expectations.
-        }
     }
 }
