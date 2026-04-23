@@ -51,12 +51,6 @@ android {
     }
 }
 
-// JVM sources jar
-val jvmSourcesJar by tasks.registering(Jar::class) {
-    archiveClassifier.set("sources")
-    from(sourceSets.getByName("jvmMain"))
-}
-
 publishing {
     publications {
         create<MavenPublication>("release") {
@@ -64,12 +58,8 @@ publishing {
             artifactId = "lmbridge"
             version = project.version.toString()
 
-            // Android AAR from release variant
-            from(components.getByName("release"))
-
-            // JVM JAR 추가
-            artifact(tasks.named<Jar>("jvmJar"))
-            artifact(jvmSourcesJar)
+            // Android AAR + JVM JAR 모두 포함 (Kotlin Multiplatform component)
+            from(components.getByName("kotlin"))
 
             pom {
                 name.set("LMBridge")

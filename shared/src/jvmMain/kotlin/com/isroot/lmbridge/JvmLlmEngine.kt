@@ -1,9 +1,11 @@
 package com.isroot.lmbridge
 
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Message
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -21,7 +23,7 @@ class JvmLlmEngine(
             backend = convertToSdkBackend(backend),
             maxNumTokens = maxNumTokens
         )
-        
+
         val newEngine = Engine(config)
         newEngine.initialize()
         this.engine = newEngine
@@ -29,54 +31,19 @@ class JvmLlmEngine(
 
     override fun performSendMessage(content: String, systemInstruction: String): Flow<GenerationResult> = flow {
         val currentEngine = engine ?: throw IllegalStateException("Engine not initialized")
-        
+
         val conversationConfig = ConversationConfig(
-            systemInstruction = systemInstruction
+            systemInstruction = Contents.of(systemInstruction)
         )
-        
+
         val conversation = currentEngine.createConversation(conversationConfig)
-        
-        conversation.sendMessageAsync(content).collect { token ->
-            emit(GenerationResult.Token(token))
+
+        conversation.sendMessageAsync(Contents.of(content)).collect { message: Message ->
+            emit(GenerationResult.Token(message.toString()))
         }
     }
 
     override suspend fun performShutdown() {
-        engine?.close()
-        engine = null
-    }
-
-    private fun convertToSdkBackend(backend: LMBridge.Backend): Backend {
-        return when (backend) {
-            LMBridge.Backend.CPU -> Backend.CPU()
-            LMBridge.Backend.GPU -> Backend.GPU()
-            LMBridge.Backend.NPU -> Backend.NPU()
-        }
-    }
-}
-
-    }
-
-    override fun sendMessage(content: String, systemInstruction: String): Flow<GenerationResult> = flow {
-        val currentEngine = engine ?: throw IllegalStateException("Engine not initialized")
-        
-        val conversationConfig = ConversationConfig(
-            systemInstruction = systemInstruction
-        )
-        
-        val conversation = currentEngine.createConversation(conversationConfig)
-        
-        try {
-            conversation.sendMessageAsync(content).collect { token ->
-                emit(GenerationResult.Token(token))
-            }
-            emit(GenerationResult.Done)
-        } catch (e: Exception) {
-            emit(GenerationResult.Error(e.message ?: "Unknown error occurred during generation"))
-        }
-    }
-
-    override suspend fun shutdown() {
         engine?.close()
         engine = null
     }
