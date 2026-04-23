@@ -2,57 +2,76 @@ package com.isroot.lmbridge
 
 import com.isroot.lmbridge.litert.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.cinterop.*
 
 class IosLlmEngine(
-    private val config: EngineConfig
-) : LlmEngine {
-    private var nativeEngine: Pointer? = null // Simplified representation of C pointer
-    private var nativeConversation: Pointer? = null
+    modelPath: String? = null,
+    backend: LMBridge.Backend = LMBridge.Backend.NPU,
+    maxNumTokens: Int = 8192
+) : LlmEngine(modelPath, backend, maxNumTokens) {
+    private var nativeEngine: CPointer<litert_lm_engine_t>? = null
+    private var nativeConversation: CPointer<litert_lm_conversation_t>? = null
 
-    override suspend fun initialize() {
-        // In real implementation, call the C API:
-        // nativeEngine = litert_lm_create_engine(config.modelPath)
-        // litert_lm_initialize(nativeEngine)
+    override suspend fun performInitialize() {
+        val path = modelPath ?: "gemma-4-E2B-it.litertlm"
+        
+        nativeEngine = litert_lm_create_engine(
+            path,
+            convertToNativeBackend(backend),
+            maxNumTokens
+        ) ?: throw IllegalStateException("Failed to create LiteRT-LM engine on iOS")
+        
+        litert_lm_initialize(nativeEngine)
     }
 
-    override suspend fun createConversation(): Conversation {
-        // nativeConversation = litert_lm_create_conversation(nativeEngine, "You are a helpful AI assistant.")
-        return Conversation(
-            id = "ios_conv_${kotlin.js.Date.now().toLong()}", // Using JS Date for PoC since we are in KMP
-            messages = emptyList()
+    override fun performSendMessage(content: String, systemInstruction: String): Flow<GenerationResult> = callbackFlow {
+        val engine = nativeEngine ?: throw IllegalStateException("Engine not initialized")
+        
+        nativeConversation = litert_lm_create_conversation(engine, systemInstruction)
+            ?: throw IllegalStateException("Failed to create conversation on iOS")
+
+        val stableRef = StableRef.create(this)
+        
+        litert_lm_send_message_async(
+            nativeConversation,
+            content,
+            staticCFunction { message, status, user_data ->
+                val scope = user_data?.asStableRef<ProducerScope<GenerationResult>>()?.get()
+                when (status) {
+                    0 -> scope?.trySend(GenerationResult.Token(message?.toKString() ?: ""))
+                    1 -> {
+                        scope?.trySend(GenerationResult.Done)
+                        scope?.close()
+                    }
+                    else -> {
+                        scope?.trySend(GenerationResult.Error("iOS Native Error: $status"))
+                        scope?.close()
+                    }
+                }
+            },
+            stableRef.asCPointer()
         )
-    }
 
-    override fun sendMessage(conversationId: String, content: String): Flow<GenerationResult> = flow {
-        if (nativeConversation == null) {
-            emit(GenerationResult.Error("Conversation not initialized"))
-            return@flow
-        }
-
-        try {
-            // Simulate C API call:
-            // val response = litert_lm_send_message(nativeConversation, content)
-            emit(GenerationResult.Token("iOS Response for: $content"))
-            emit(GenerationResult.Done)
-        } catch (e: Throwable) {
-            emit(GenerationResult.Error(e.message ?: "iOS C-API Error"))
+        awaitClose {
+            stableRef.dispose()
+            litert_lm_cancel_process(nativeConversation)
         }
     }
 
-    override suspend fun getConversations(): List<Conversation> {
-        return emptyList()
-    }
-
-    override suspend fun shutdown() {
-        // litert_lm_destroy_conversation(nativeConversation)
-        // litert_lm_destroy_engine(nativeEngine)
+    override suspend fun performShutdown() {
+        nativeConversation?.let { litert_lm_destroy_conversation(it) }
+        nativeEngine?.let { litert_lm_destroy_engine(it) }
         nativeConversation = null
         nativeEngine = null
     }
-    
-    // Helper for the C-interop dummy pointers
-    private typealias Pointer = Any?
+
+    private fun convertToNativeBackend(backend: LMBridge.Backend): Int {
+        return when (backend) {
+            LMBridge.Backend.CPU -> 0
+            LMBridge.Backend.GPU -> 1
+            LMBridge.Backend.NPU -> 2
+        }
+    }
 }

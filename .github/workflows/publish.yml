@@ -26,12 +26,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Publish to local repository
-        run: ./gradlew clean :lmbridge:publishReleasePublicationToLocalRepository --no-daemon
+        run: ./gradlew clean :shared:publishReleasePublicationToLocalRepository --no-daemon
 
       - name: Get version from published POM
         id: version
         run: |
-          VERSION=$(ls lmbridge/build/repo/com/isroot/lmbridge/ | grep -E '^[0-9]' | head -1)
+          # shared 모듈의 repo 경로에서 버전 추출
+          VERSION=$(ls shared/build/repo/com/isroot/lmbridge/ | grep -E '^[0-9]' | head -1)
           echo "Found version in repo: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
@@ -48,8 +49,24 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           echo "Publishing version: $VERSION"
+          
+          # 플랫폼별 결과물을 각각의 폴더로 복사
+          # Android
+          mkdir -p maven-repo/com/isroot/lmbridge/android/$VERSION
+          cp -r shared/build/repo/com/isroot/lmbridge/$VERSION/android/* maven-repo/com/isroot/lmbridge/android/$VERSION/ || true
+          
+          # JVM
+          mkdir -p maven-repo/com/isroot/lmbridge/jvm/$VERSION
+          cp -r shared/build/repo/com/isroot/lmbridge/$VERSION/jvm/* maven-repo/com/isroot/lmbridge/jvm/$VERSION/ || true
+          
+          # iOS (macOS 빌드 시 추가됨)
+          mkdir -p maven-repo/com/isroot/lmbridge/ios/$VERSION
+          cp -r shared/build/repo/com/isroot/lmbridge/$VERSION/ios/* maven-repo/com/isroot/lmbridge/ios/$VERSION/ || true
+          
+          # 공통 POM 파일은 루트 버전 폴더에 유지 (필요시)
           mkdir -p maven-repo/com/isroot/lmbridge/$VERSION
-          cp -r lmbridge/build/repo/com/isroot/lmbridge/$VERSION/* maven-repo/com/isroot/lmbridge/$VERSION/
+          cp shared/build/repo/com/isroot/lmbridge/$VERSION/*.pom maven-repo/com/isroot/lmbridge/$VERSION/ || true
+
 
       - name: Commit and push
         working-directory: maven-repo

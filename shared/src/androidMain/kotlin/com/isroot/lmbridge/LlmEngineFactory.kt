@@ -1,12 +1,18 @@
 package com.isroot.lmbridge
 
-actual class LlmEngineFactory {
-    actual companion object {
-        actual fun create(config: EngineConfig): LlmEngine {
-            return AndroidLlmEngine(
-                context = AndroidSdkConfig.requireContext(),
-                config = config
-            )
-        }
+import android.content.Context
+
+actual class LlmEngineFactory(private val context: Context) {
+    actual fun createEngine(
+        modelPath: String? = null,
+        backend: LMBridge.Backend = LMBridge.Backend.NPU,
+        maxNumTokens: Int = 8192
+    ): LlmEngine {
+        return AndroidLlmEngine(
+            context = context,
+            modelPath = modelPath,
+            backend = backend,
+            maxNumTokens = maxNumTokens
+        )
     }
 }

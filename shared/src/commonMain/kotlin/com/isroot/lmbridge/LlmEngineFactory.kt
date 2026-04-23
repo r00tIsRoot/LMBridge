@@ -1,7 +1,12 @@
 package com.isroot.lmbridge
 
+/**
+ * Factory for creating platform-specific LlmEngine implementations.
+ */
 expect class LlmEngineFactory {
-    companion object {
-        fun create(config: EngineConfig): LlmEngine
-    }
+    fun createEngine(
+        modelPath: String? = null,
+        backend: LMBridge.Backend = LMBridge.Backend.NPU,
+        maxNumTokens: Int = 8192
+    ): LlmEngine
 }

@@ -4,6 +4,8 @@ plugins {
     id("com.android.library")
 }
 
+version = "0.1.1"
+
 kotlin {
     androidTarget {
         publishLibraryVariants("release")
@@ -39,8 +41,7 @@ kotlin {
             }
         }
     }
-
-
+    
     sourceSets {
         val commonMain by getting {
             dependencies {
@@ -50,12 +51,12 @@ kotlin {
         }
         val androidMain by getting {
             dependencies {
-                implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.0")
+                // SDK 의존성 제거: 네이티브 라이브러리(lmbridge_core)를 직접 사용함
             }
         }
         val jvmMain by getting {
             dependencies {
-                implementation("com.google.ai.edge.litertlm:litertlm-jvm:0.10.0")
+                implementation("com.google.ai.edge.litertlm:litertlm-jvm:0.10.2")
             }
         }
         val jsMain by getting {
@@ -66,9 +67,6 @@ kotlin {
         val iosMain by creating {
             dependsOn(commonMain)
         }
-        val iosX64Main by getting { dependsOn(iosMain) }
-        val iosArm64Main by getting { dependsOn(iosMain) }
-        val iosSimulatorArm64Main by getting { dependsOn(iosMain) }
     }
 }
 
