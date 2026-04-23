@@ -51,13 +51,47 @@ android {
     }
 }
 
+// JVM sources jar
+val jvmSourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+    from(sourceSets.getByName("jvmMain"))
+}
+
 publishing {
     publications {
         create<MavenPublication>("release") {
             groupId = "com.isroot"
             artifactId = "lmbridge"
             version = project.version.toString()
-            from(components["kotlin"])
+
+            // Android AAR from release variant
+            from(components.getByName("release"))
+
+            // JVM JAR 추가
+            artifact(tasks.named<Jar>("jvmJar"))
+            artifact(jvmSourcesJar)
+
+            pom {
+                name.set("LMBridge")
+                description.set("LLM Bridge Library for Android and JVM")
+                url.set("https://github.com/isroot/lmbridge")
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("isroot")
+                        name.set("isroot")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/isroot/lmbridge")
+                    connection.set("scm:git:https://github.com/isroot/lmbridge.git")
+                }
+            }
         }
     }
     repositories {
