@@ -3,11 +3,10 @@ package com.isroot.lmbridge
 import kotlinx.coroutines.flow.Flow
 
 class LMBridgeClient(
-    engine: LlmEngine,
-    private val maxNumTokens: Int = 8192
+    private val engine: LlmEngine,
+    private val config: LlmOrchestrator.OrchestratorConfig = LlmOrchestrator.OrchestratorConfig()
 ) {
-    private val orchestrator = LlmOrchestrator(engine, maxNumTokens)
-
+    private val orchestrator = LlmOrchestrator(engine, config)
 
     suspend fun initialize() {
         engine.initialize()
@@ -15,7 +14,7 @@ class LMBridgeClient(
 
     fun generate(
         prompt: String,
-        systemInstruction: String = "You are a helpful AI assistant."
+        systemInstruction: String = config.defaultSystemInstruction
     ): Flow<GenerationResult> {
         return orchestrator.generate(prompt, systemInstruction)
     }
