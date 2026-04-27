@@ -4,6 +4,7 @@
 /lmbridge/build/
 
 .idea/
+.idea/*
 !.idea/.gitignore
 !.idea/AndroidProjectSystem.xml
 !.idea/caches/
@@ -23,6 +24,6 @@
 .idea/runConfigurations.xml
 .idea/vcs.xml
 
-local.properties
+./local.properties
 *.litertlm
 build/
