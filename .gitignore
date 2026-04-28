@@ -4,6 +4,7 @@
 /lmbridge/build/
 
 .idea/
+.idea/*
 !.idea/.gitignore
 
 local.properties
