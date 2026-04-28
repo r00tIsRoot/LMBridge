@@ -4,7 +4,7 @@ Google LiteRT-LM (온디바이스 LLM 추론) Android SDK
 
 ## 개요
 
-LMBridge는 Google's LiteRT-LM 엔진을 사용하여 온디바이스 LLM 추론을 제공하는 Android 라이브러리입니다. 텍스트 생성, 멀티모달 (이미지 + 텍스트) 추론, 도구 호출을 지원합니다.
+LMBridge는 Google's LiteRT-LM 엔진을 사용하여 온디바이스 LLM 추론을 제공하는 Android 라이브러리입니다. 텍스트 생성, 멀티모달 (이미지, 오디오 + 텍스트) 추론, 도구 호출을 지원합니다.
 
 ## 요구사항
 
@@ -93,11 +93,13 @@ lifecycleScope.launch {
 |--------|------|
 | `initialize()` | LLM 엔진 초기화 |
 | `generate(prompt)` | 텍스트만 생성 |
-| `generateWithImages(prompt, images)` | 멀티모달 (텍스트 + 이미지) |
-| `generateWithTools(prompt, tools)` | 도구 호출 |
-| `generateWithInput(input)` | MultimodalInput 사용 |
-| `stopGeneration()` | 진행 중인 생성 취소 |
-| `release()` | 리소스 해제 |
+| `generateWithImages(prompt, images)` | 멀티모달 (텍스트 + 이미지) 추론 |
+| `generateWithAudio(prompt, audioBytes)` | 멀티모달 (텍스트 + 오디오) 추론 |
+| `generateWithTools(prompt, tools)` | 도구 호출 지원 생성 |
+| `generateWithInput(input)` | `MultimodalInput`을 통한 통합 추론 |
+| `generateWithFiles(prompt, filePaths)` | 파일 내용을 컨텍스트로 포함하여 생성 |
+| `stopGeneration()` | 진행 중인 모든 생성 취소 |
+| `release()` | 모든 리소스 및 엔진 해제 |
 | `getDownloadManager()` | 모델 다운로드 관리자 가져오기 |
 
 ### GenerationResult
@@ -151,18 +153,17 @@ lifecycleScope.launch {
 }
 ```
 
-### 멀티모달 (이미지 + 텍스트)
+### 멀티모달 추론 (이미지 및 오디오)
 
 ```kotlin
 lifecycleScope.launch {
-    val images = listOf(cameraBitmap, galleryBitmap)
-    client.generateWithImages("이 이미지를 설명해줘:", images).collect { result ->
-        when (result) {
-            is GenerationResult.Token -> updateResponse(result.text)
-            is GenerationResult.Done -> finish()
-            is GenerationResult.Error -> error(result.message)
-        }
-    }
+    // 이미지 추론
+    val images = listOf(cameraBitmap)
+    client.generateWithImages("이 이미지의 분위기를 설명해줘", images).collect { ... }
+    
+    // 오디오 추론
+    val audioData = audioRecorder.getAudioBytes()
+    client.generateWithAudio("이 오디오 파일의 내용을 요약해줘", audioData).collect { ... }
 }
 ```
 
@@ -198,12 +199,12 @@ client.stopGeneration()
 
 ## 백엔드 설정
 
-SDK는 기본적으로 NPU 백엔드를 사용합니다. `ModelInferenceManager`에서 수정할 수 있습니다:
+SDK는 기본적으로 CPU 백엔드를 사용합니다. `ModelInferenceManager`에서 수정할 수 있습니다:
 
 ```kotlin
 val engineConfig = EngineConfig(
     modelPath = finalModelPath,
-    backend = Backend.NPU(),  // 옵션: NPU(), CPU(), GPU()
+    backend = Backend.CPU(),  // 옵션: NPU(), CPU(), GPU()
 )
 ```
 
