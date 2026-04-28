@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 class LMBridgeClient private constructor(
     private val context: Context,
     private val modelPath: String? = null,
-    private val backend: LMBridge.Backend = LMBridge.Backend.NPU,
+    private val backend: LMBridge.Backend = LMBridge.Backend.CPU,
     private val maxNumTokens: Int = 8192,
 ) {
     private val inferenceManager = ModelInferenceManager(context, modelPath, backend, maxNumTokens)
