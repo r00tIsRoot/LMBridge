@@ -47,8 +47,13 @@ class LMBridgeClient private constructor(
     fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> {
         val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
         val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
+        val audios = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Audio>()
 
         return when {
+            audios.isNotEmpty() -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generateWithAudio(prompt, audios.map { it.bytes })
+            }
             images.isNotEmpty() -> {
                 val prompt = texts.joinToString(" ") { it.text }
                 inferenceManager.generateWithImages(prompt, images.map { it.bitmap })
@@ -61,6 +66,14 @@ class LMBridgeClient private constructor(
                 inferenceManager.generate(prompt)
             }
         }
+    }
+
+    fun generateWithAudio(
+        prompt: String,
+        audioBytes: ByteArray,
+        systemInstruction: String = "You are a helpful AI assistant."
+    ): Flow<GenerationResult> {
+        return inferenceManager.generateWithAudio(prompt, listOf(audioBytes), systemInstruction)
     }
 
     fun stopGeneration() {

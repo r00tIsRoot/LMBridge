@@ -235,6 +235,57 @@ class ModelInferenceManager(
         }
     }
 
+    fun generateWithAudio(
+        prompt: String,
+        audioBytesList: List<ByteArray>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val engine = this@ModelInferenceManager.engine
+            ?: throw IllegalStateException("Engine not initialized")
+
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
+        )
+
+        Logger.d(TAG, "Creating conversation for audio generation")
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+
+        val contents = mutableListOf<Content>()
+        audioBytesList.forEach { bytes ->
+            contents.add(Content.AudioBytes(bytes))
+        }
+        contents.add(Content.Text(prompt))
+
+        Logger.d(TAG, "Sending audio messages (${audioBytesList.size} audio parts)")
+        conversation.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    Logger.v(TAG, "onMessage: $message")
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+
+                override fun onDone() {
+                    Logger.d(TAG, "Audio generation completed")
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Audio generation error", throwable)
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+
+        awaitClose {
+            Logger.d(TAG, "Cancelling audio generation")
+            conversation.cancelProcess()
+        }
+    }
+
     fun stopGeneration() {
         Logger.d(TAG, "Stopping generation")
         currentConversation?.cancelProcess()
