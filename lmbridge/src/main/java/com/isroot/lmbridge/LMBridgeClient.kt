@@ -88,8 +88,7 @@ class LMBridgeClient private constructor(
 
     class Builder(private val context: Context) {
         private var modelPath: String? = null
-        private var backend: LMBridge.Backend = LMBridge.Backend.NPU
-        private var maxNumTokens: Int = 4096
+        private var backend: LMBridge.Backend = LMBridge.Backend.CPU
         private var maxNumTokens: Int = 1024
 
         fun setModelPath(path: String): Builder {
