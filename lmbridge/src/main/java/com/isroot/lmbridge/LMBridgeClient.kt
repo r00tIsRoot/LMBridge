@@ -13,7 +13,7 @@ class LMBridgeClient private constructor(
     private val context: Context,
     private val modelPath: String? = null,
     private val backend: LMBridge.Backend = LMBridge.Backend.CPU,
-    private val maxNumTokens: Int = 8192,
+    private val maxNumTokens: Int = 4096,
 ) {
     private val inferenceManager = ModelInferenceManager(context, modelPath, backend, maxNumTokens)
     private val downloadManager = ModelDownloadManager(context)
@@ -89,7 +89,7 @@ class LMBridgeClient private constructor(
     class Builder(private val context: Context) {
         private var modelPath: String? = null
         private var backend: LMBridge.Backend = LMBridge.Backend.NPU
-        private var maxNumTokens: Int = 8192
+        private var maxNumTokens: Int = 4096
 
         fun setModelPath(path: String): Builder {
             modelPath = path
