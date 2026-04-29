@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -93,6 +94,45 @@ class ModelInferenceManager(
     ): Flow<GenerationResult> = generateSingle(listOf(prompt), systemInstruction)
 
     private fun generateSingle(
+        texts: List<String>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
+        val totalTokens = texts.sumOf { estimateTokenCount(it) }
+        if (totalTokens <= maxNumTokens) {
+            emitAll(executeGenerateSingle(texts, systemInstruction))
+        } else {
+            val chunks = chunkTexts(texts, maxNumTokens)
+            emit(GenerationResult.Token("Processing ${chunks.size} text chunks...\n"))
+            chunks.forEachIndexed { index, chunk ->
+                emit(GenerationResult.Token("\n--- Text Chunk ${index + 1}/${chunks.size} ---\n"))
+                emitAll(executeGenerateSingle(chunk, systemInstruction))
+            }
+            emit(GenerationResult.Done)
+        }
+    }
+
+    private fun chunkTexts(texts: List<String>, maxTokens: Int): List<List<String>> {
+        val chunks = mutableListOf<List<String>>()
+        var currentChunk = mutableListOf<String>()
+        var currentTokens = 0
+
+        for (text in texts) {
+            val tokens = estimateTokenCount(text)
+            if (currentTokens + tokens > maxTokens && currentChunk.isNotEmpty()) {
+                chunks.add(currentChunk)
+                currentChunk = mutableListOf()
+                currentTokens = 0
+            }
+            currentChunk.add(text)
+            currentTokens += tokens
+        }
+        if (currentChunk.isNotEmpty()) {
+            chunks.add(currentChunk)
+        }
+        return chunks
+    }
+
+    private fun executeGenerateSingle(
         texts: List<String>,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
     ): Flow<GenerationResult> = callbackFlow {
