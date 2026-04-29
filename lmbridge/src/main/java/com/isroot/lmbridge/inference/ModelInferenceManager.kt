@@ -26,7 +26,7 @@ class ModelInferenceManager(
     private val context: Context,
     private val modelPath: String? = null,
     private val backend: LMBridge.Backend = LMBridge.Backend.CPU,
-    private val maxNumTokens: Int = 8192,
+    private val maxNumTokens: Int = 1024,
 ) {
     private var engine: Engine? = null
     private var currentConversation: Conversation? = null
