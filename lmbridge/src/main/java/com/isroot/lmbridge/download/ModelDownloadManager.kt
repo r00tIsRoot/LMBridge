@@ -21,7 +21,7 @@ class ModelDownloadManager(private val context: Context) {
 
     companion object {
         private const val TAG = "ModelDownloadManager"
-        private const val DEFAULT_BUFFER_SIZE = 4096
+        private const val DEFAULT_BUFFER_SIZE = 1024
     }
 
     /**
