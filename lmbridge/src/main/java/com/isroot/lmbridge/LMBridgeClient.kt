@@ -8,6 +8,9 @@ import com.isroot.lmbridge.inference.GenerationResult
 import com.isroot.lmbridge.inference.ModelInferenceManager
 import com.isroot.lmbridge.models.MultimodalInput
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
 
 class LMBridgeClient private constructor(
     private val context: Context,
@@ -44,27 +47,45 @@ class LMBridgeClient private constructor(
         return inferenceManager.generateWithTools(prompt, tools)
     }
 
-    fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> {
+    fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> = flow {
         val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
         val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
         val audios = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Audio>()
+        val prompt = texts.joinToString(" ") { it.text }
 
-        return when {
-            audios.isNotEmpty() -> {
-                val prompt = texts.joinToString(" ") { it.text }
-                inferenceManager.generateWithAudio(prompt, audios.map { it.bytes })
+        val conversation = inferenceManager.createSession()
+        try {
+            val chunks = if (inferenceManager.estimateTokenCount(prompt) > maxNumTokens) {
+                inferenceManager.splitByTokenLimit(prompt, maxNumTokens)
+            } else {
+                listOf(prompt)
             }
-            images.isNotEmpty() -> {
-                val prompt = texts.joinToString(" ") { it.text }
-                inferenceManager.generateWithImages(prompt, images.map { it.bitmap })
+
+            if (chunks.size > 1) {
+                emit(GenerationResult.Token("Processing ${chunks.size} chunks...\n"))
             }
-            texts.size > 1 -> {
-                inferenceManager.generateWithTexts(texts.map { it.text })
+
+            chunks.forEachIndexed { index, chunk ->
+                if (chunks.size > 1) {
+                    emit(GenerationResult.Token("\n--- Chunk ${index + 1}/${chunks.size} ---\n"))
+                }
+
+                val resultFlow = when {
+                    audios.isNotEmpty() -> {
+                        inferenceManager.executeGenerateWithAudio(conversation, chunk, audios.map { it.bytes })
+                    }
+                    images.isNotEmpty() -> {
+                        inferenceManager.executeGenerateWithImages(conversation, chunk, images.map { it.bitmap })
+                    }
+                    else -> {
+                        inferenceManager.executeGenerateSingle(conversation, listOf(chunk))
+                    }
+                }
+                emitAll(resultFlow.filter { it !is GenerationResult.Done })
             }
-            else -> {
-                val prompt = texts.joinToString(" ") { it.text }
-                inferenceManager.generate(prompt)
-            }
+            emit(GenerationResult.Done)
+        } finally {
+            conversation.close()
         }
     }
 
