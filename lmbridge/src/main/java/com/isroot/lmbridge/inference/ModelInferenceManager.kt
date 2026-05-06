@@ -202,13 +202,21 @@ class ModelInferenceManager(
         currentConversation = conversation
         
         try {
-            val totalTokens = texts.sumOf { estimateTokenCount(it) }.apply {
-                Logger.d("", "totalTokens: $this")
+            // 1. 개별 문자열이 너무 길면 먼저 쪼개서 평탄화함
+            val flattenedTexts = texts.flatMap { text ->
+                if (estimateTokenCount(text) > maxNumTokens) {
+                    splitByTokenLimit(text, maxNumTokens)
+                } else {
+                    listOf(text)
+                }
             }
+            
+            val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }
             if (totalTokens <= maxNumTokens) {
-                emitAll(executeGenerateSingle(conversation, texts, systemInstruction))
+                emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
             } else {
-                val chunks = chunkTexts(texts, maxNumTokens)
+                // 2. 쪼개진 문자열들을 다시 maxNumTokens 단위로 묶어서 청크 생성
+                val chunks = chunkTexts(flattenedTexts, maxNumTokens)
                 val fullResult = StringBuilder()
                 
                 chunks.forEach { chunk ->
