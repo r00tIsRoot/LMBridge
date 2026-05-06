@@ -57,46 +57,12 @@ class ModelInferenceManager(
     fun generate(
         prompt: String,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        try {
-            emitAll(executeGenerateSingle(conversation, listOf(prompt), systemInstruction))
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
-    }
+    ): Flow<GenerationResult> = generateChunked(listOf(prompt), systemInstruction)
 
     fun generateWithTexts(
         texts: List<String>,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        try {
-            val totalTokens = texts.sumOf { estimateTokenCount(it) }
-            if (totalTokens <= maxNumTokens) {
-                emitAll(executeGenerateSingle(conversation, texts, systemInstruction))
-            } else {
-                val chunks = chunkTexts(texts, maxNumTokens)
-                emit(GenerationResult.Token("Processing ${chunks.size} text chunks...\n"))
-                chunks.forEachIndexed { index, chunkTexts ->
-                    emit(GenerationResult.Token("\n--- Text Chunk ${index + 1}/${chunks.size} ---\n"))
-                    emitAll(executeGenerateSingle(conversation, chunkTexts, systemInstruction).filter { it !is GenerationResult.Done })
-                }
-                emit(GenerationResult.Done)
-            }
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
-    }
-
+    ): Flow<GenerationResult> = generateChunked(texts, systemInstruction)
 
     fun generateWithImages(
         prompt: String,
@@ -179,30 +145,7 @@ class ModelInferenceManager(
         } else {
             prompt
         }
-
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-
-        try {
-            val texts = listOf(contextPrompt)
-            val totalTokens = texts.sumOf { estimateTokenCount(it) }
-            if (totalTokens <= maxNumTokens) {
-                emitAll(executeGenerateSingle(conversation, texts, systemInstruction))
-            } else {
-                val chunks = chunkTexts(texts, maxNumTokens)
-                emit(GenerationResult.Token("Processing ${chunks.size} text chunks...\n"))
-                chunks.forEachIndexed { index, chunk ->
-                    emit(GenerationResult.Token("\n--- Text Chunk ${index + 1}/${chunks.size} ---\n"))
-                    emitAll(executeGenerateSingle(conversation, chunk, systemInstruction).filter { it !is GenerationResult.Done })
-                }
-                emit(GenerationResult.Done)
-            }
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
+        emitAll(generateChunked(listOf(contextPrompt), systemInstruction))
     }
 
     fun stopGeneration() {
@@ -249,8 +192,42 @@ class ModelInferenceManager(
         return chunks
     }
 
-    private fun chunkTexts(texts: List<String>, maxTokens: Int): List<List<String>> {
+    private fun generateChunked(
+        texts: List<String>,
+        systemInstruction: String,
+    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
+        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
+        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
+        
+        try {
+            val totalTokens = texts.sumOf { estimateTokenCount(it) }
+            if (totalTokens <= maxNumTokens) {
+                emitAll(executeGenerateSingle(conversation, texts, systemInstruction))
+            } else {
+                val chunks = chunkTexts(texts, maxNumTokens)
+                val fullResult = StringBuilder()
+                
+                chunks.forEach { chunk ->
+                    executeGenerateSingle(conversation, chunk, systemInstruction)
+                        .filter { it is GenerationResult.Token }
+                        .collect { result ->
+                            if (result is GenerationResult.Token) {
+                                fullResult.append(result.text)
+                            }
+                        }
+                }
+                emit(GenerationResult.Token(fullResult.toString()))
+                emit(GenerationResult.Done)
+            }
+        } finally {
+            conversation.close()
+            currentConversation = null
+        }
+    }
 
+    private fun chunkTexts(texts: List<String>, maxTokens: Int): List<List<String>> {
         val chunks = mutableListOf<List<String>>()
         var currentChunk = mutableListOf<String>()
         var currentTokens = 0
