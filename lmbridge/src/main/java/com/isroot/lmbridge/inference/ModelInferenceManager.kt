@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -105,7 +107,10 @@ class ModelInferenceManager(
             emit(GenerationResult.Token("Processing ${chunks.size} text chunks...\n"))
             chunks.forEachIndexed { index, chunk ->
                 emit(GenerationResult.Token("\n--- Text Chunk ${index + 1}/${chunks.size} ---\n"))
-                emitAll(executeGenerateSingle(chunk, systemInstruction))
+                emitAll(
+                    executeGenerateSingle(chunk, systemInstruction)
+                        .filter { it !is GenerationResult.Done }
+                )
             }
             emit(GenerationResult.Done)
         }
