@@ -47,18 +47,16 @@ class LMBridgeClient private constructor(
         return inferenceManager.generateWithTools(prompt, tools)
     }
 
-    fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> = flow {
+    fun generateWithInput(prompt: String, input: MultimodalInput): Flow<GenerationResult> = flow {
         val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
-        val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
-        val audios = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Audio>()
-        val prompt = texts.joinToString(" ") { it.text }
+        val promptText = if (texts.isEmpty()) prompt else texts.joinToString(" ") { it.text }
 
         val conversation = inferenceManager.createSession()
         try {
-            val chunks = if (inferenceManager.estimateTokenCount(prompt) > maxNumTokens) {
-                inferenceManager.splitByTokenLimit(prompt, maxNumTokens)
+            val chunks = if (inferenceManager.estimateTokenCount(promptText) > maxNumTokens) {
+                inferenceManager.splitByTokenLimit(promptText, maxNumTokens)
             } else {
-                listOf(prompt)
+                listOf(promptText)
             }
 
             if (chunks.size > 1) {
@@ -70,17 +68,12 @@ class LMBridgeClient private constructor(
                     emit(GenerationResult.Token("\n--- Chunk ${index + 1}/${chunks.size} ---\n"))
                 }
 
-                val resultFlow = when {
-                    audios.isNotEmpty() -> {
-                        inferenceManager.executeGenerateWithAudio(conversation, chunk, audios.map { it.bytes })
-                    }
-                    images.isNotEmpty() -> {
-                        inferenceManager.executeGenerateWithImages(conversation, chunk, images.map { it.bitmap })
-                    }
-                    else -> {
-                        inferenceManager.executeGenerateSingle(conversation, listOf(chunk))
-                    }
-                }
+                val chunkInput = input.copy(
+                    parts = input.parts.filter { it !is com.isroot.lmbridge.models.MultimodalContent.Text } + 
+                            com.isroot.lmbridge.models.MultimodalContent.Text(chunk)
+                )
+                
+                val resultFlow = inferenceManager.executeGenerate(conversation, chunkInput)
                 emitAll(resultFlow.filter { it !is GenerationResult.Done })
             }
             emit(GenerationResult.Done)

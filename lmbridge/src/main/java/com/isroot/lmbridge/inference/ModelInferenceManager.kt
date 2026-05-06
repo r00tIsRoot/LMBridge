@@ -245,6 +245,33 @@ class ModelInferenceManager(
         return chunks
     }
 
+    internal fun executeGenerate(
+        conversation: Conversation,
+        input: com.isroot.lmbridge.models.MultimodalInput,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val contents = input.parts.map { it.convertToContent() }
+        
+        conversation.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+                override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Generation error", throwable)
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            },
+        )
+        awaitClose { conversation.cancelProcess() }
+    }
+
     internal fun executeGenerateSingle(
         conversation: Conversation,
         texts: List<String>,
@@ -289,6 +316,7 @@ class ModelInferenceManager(
                     close()
                 }
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Multimodal generation error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
@@ -316,6 +344,7 @@ class ModelInferenceManager(
                     close()
                 }
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Multimodal generation error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
@@ -339,6 +368,7 @@ class ModelInferenceManager(
                     close()
                 }
                 override fun onError(throwable: Throwable) {
+                    Logger.e(TAG, "Tool calling error", throwable)
                     trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
                     close()
                 }
