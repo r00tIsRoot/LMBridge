@@ -231,15 +231,18 @@ class ModelInferenceManager(
                 val chunks = chunkTexts(flattenedTexts, maxNumTokens)
                 val fullResult = StringBuilder()
                 
-                chunks.forEach { chunk ->
+                chunks.forEachIndexed { index, chunk ->
+                    Logger.d(TAG, "Processing chunk ${index + 1}/${chunks.size}")
                     executeGenerateSingle(conversation, chunk, systemInstruction)
-                        .filter { it is GenerationResult.Token }
                         .collect { result ->
                             if (result is GenerationResult.Token) {
                                 fullResult.append(result.text)
+                            } else if (result is GenerationResult.Done) {
+                                Logger.d(TAG, "Chunk ${index + 1} done")
                             }
                         }
                 }
+                Logger.d(TAG, "All chunks processed. Emitting final result.")
                 emit(GenerationResult.Token(fullResult.toString()))
                 emit(GenerationResult.Done)
             }
