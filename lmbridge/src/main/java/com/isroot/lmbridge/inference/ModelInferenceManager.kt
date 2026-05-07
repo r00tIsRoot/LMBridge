@@ -206,9 +206,6 @@ class ModelInferenceManager(
         systemInstruction: String,
     ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
         val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
         
         try {
             // 1. 개별 문자열이 너무 길면 먼저 쪼개서 평탄화함
@@ -221,40 +218,74 @@ class ModelInferenceManager(
             }
             
             val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }
+            
             if (totalTokens <= maxNumTokens) {
-                emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
+                // 단일 요청인 경우 기존의 고수준 API 사용 (최적화됨)
+                val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
+                val conversation = engine.createConversation(config)
+                currentConversation = conversation
+                try {
+                    emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
+                } finally {
+                    conversation.close()
+                    currentConversation = null
+                }
             } else {
-                // 2. ACK 기반 단계적 컨텍스트 주입 전략
-                val chunks = chunkTexts(flattenedTexts, maxNumTokens)
+                // 2. 완성형 True Chunking 구현: Session API + 정밀 템플릿 주입
+                Logger.d(TAG, "Starting Advanced True Chunking for $totalTokens tokens")
                 
-                chunks.forEachIndexed { index, chunk ->
-                    val isLast = index == chunks.size - 1
-                    val wrappedPrompt = if (!isLast) {
-                        "지금부터 긴 텍스트를 나누어 보내겠습니다. 모든 내용을 다 읽을 때까지 답변하지 말고, 확인했다면 'ACK'라고만 짧게 답하세요.\n\n내용: ${chunk.joinToString("\\n")}"
-                    } else {
-                        "마지막 내용입니다: ${chunk.joinToString("\\n")}\n\n이제 모든 내용을 바탕으로 지시 사항에 따라 최종 결과를 출력하세요."
-                    }
+                // 결정론적 응답을 위한 SamplerConfig 설정 (Temperature = 0)
+                val samplerConfig = com.google.ai.edge.litertlm.SamplerConfig(
+                    temperature = 0.0,
+                    topK = 1,
+                    topP = 1.0
+                )
+                val sessionConfig = com.google.ai.edge.litertlm.SessionConfig(samplerConfig = samplerConfig)
+                val session = engine.createSession(sessionConfig)
+                
+                try {
+                    val chunks = chunkTexts(flattenedTexts, maxNumTokens)
                     
-                    Logger.d(TAG, "Sending chunk ${index + 1}/${chunks.size} (isLast=$isLast)")
-                    
-                    // 고수준 API를 통해 메시지 전송
-                    executeGenerateSingle(conversation, listOf(wrappedPrompt), systemInstruction)
-                        .collect { result ->
-                            if (isLast) {
-                                // 마지막 청크의 응답만 사용자에게 방출
-                                emit(result)
-                            } else {
-                                // 중간 청크의 응답('ACK')은 로그만 남기고 버림
-                                if (result is GenerationResult.Token) {
-                                    Logger.d(TAG, "Model acknowledged chunk ${index + 1}")
+                    chunks.forEachIndexed { index, chunk ->
+                        val isFirst = index == 0
+                        val isLast = index == chunks.size - 1
+                        
+                        // Gemma 채팅 템플릿을 적용하여 입력 텍스트 구성
+                        val wrappedText = StringBuilder().apply {
+                            if (isFirst) {
+                                append("<start_of_turn>user\n")
+                                if (systemInstruction.isNotEmpty()) {
+                                    append(systemInstruction).append("\n")
                                 }
                             }
-                        }
+                            append(chunk.joinToString("\\n"))
+                            if (isLast) {
+                                append("<end_of_turn>\n<start_of_turn>model\n")
+                            }
+                        }.toString()
+                        
+                        Logger.d(TAG, "Prefilling chunk ${index + 1}/${chunks.size} (isFirst=$isFirst, isLast=$isLast)")
+                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(wrappedText)))
+                    }
+                    
+                    // 모든 컨텍스트가 주입되었으므로, 단 한 번의 Decode 수행
+                    Logger.d(TAG, "All chunks prefilled. Executing final decode.")
+                    val finalResponse = session.runDecode().apply {
+                        Logger.d(TAG, "finalResponse: $this")
+                    }
+                    
+                    // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과 유지)
+                    finalResponse.chunked(10).forEach { token ->
+                        emit(GenerationResult.Token(token))
+                    }
+                    emit(GenerationResult.Done)
+                } finally {
+                    session.close()
                 }
             }
-        } finally {
-            conversation.close()
-            currentConversation = null
+        } catch (e: Exception) {
+            Logger.e(TAG, "Error during chunked generation", e)
+            emit(GenerationResult.Error(e.message ?: "Unknown error"))
         }
     }
 
