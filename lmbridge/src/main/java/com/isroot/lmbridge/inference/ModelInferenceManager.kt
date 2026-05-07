@@ -206,6 +206,9 @@ class ModelInferenceManager(
         systemInstruction: String,
     ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
         val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
+        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
+        val conversation = engine.createConversation(config)
+        currentConversation = conversation
         
         try {
             // 1. 개별 문자열이 너무 길면 먼저 쪼개서 평탄화함
@@ -218,67 +221,40 @@ class ModelInferenceManager(
             }
             
             val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }
-            
             if (totalTokens <= maxNumTokens) {
-                // 단일 요청인 경우 기존의 고수준 API 사용
-                val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-                val conversation = engine.createConversation(config)
-                currentConversation = conversation
-                try {
-                    emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
-                } finally {
-                    conversation.close()
-                    currentConversation = null
-                }
+                emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
             } else {
-                // 2. True Chunking 구현: Session API를 사용하여 Prefill 분리
-                Logger.d(TAG, "Starting True Chunking for $totalTokens tokens")
-
-                // 세션 생성 (SamplerConfig는 기본값 사용)
-                val session = engine.createSession()
-                try {
-                    // 0. 채팅 템플릿 적용: User 턴 시작 및 시스템 지침 전달
-                    if (systemInstruction.isNotEmpty()) {
-                        Logger.d(TAG, "Prefilling system instruction with chat template")
-                        val systemWrapped = "<start_of_turn>user\n$systemInstruction\n"
-                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(systemWrapped)))
+                // 2. ACK 기반 단계적 컨텍스트 주입 전략
+                val chunks = chunkTexts(flattenedTexts, maxNumTokens)
+                
+                chunks.forEachIndexed { index, chunk ->
+                    val isLast = index == chunks.size - 1
+                    val wrappedPrompt = if (!isLast) {
+                        "지금부터 긴 텍스트를 나누어 보내겠습니다. 모든 내용을 다 읽을 때까지 답변하지 말고, 확인했다면 'ACK'라고만 짧게 답하세요.\n\n내용: ${chunk.joinToString("\\n")}"
                     } else {
-                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text("<start_of_turn>user\n")))
-                    }
-
-                    val chunks = chunkTexts(flattenedTexts, maxNumTokens)
-                    
-                    // 마지막 청크 전까지는 Prefill만 수행 (사용자 입력 계속 추가)
-                    for (i in 0 until chunks.size - 1) {
-                        val chunk = chunks[i]
-                        Logger.d(TAG, "Prefilling chunk ${i + 1}/${chunks.size}")
-                        
-                        val inputData = chunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
-                        session.runPrefill(inputData)
+                        "마지막 내용입니다: ${chunk.joinToString("\\n")}\n\n이제 모든 내용을 바탕으로 지시 사항에 따라 최종 결과를 출력하세요."
                     }
                     
-                    // 마지막 청크: Prefill 후 User 턴을 닫고 Model 턴을 시작하여 Decode 트리거
-                    val lastChunk = chunks.last()
-                    Logger.d(TAG, "Processing final chunk ${chunks.size}/${chunks.size}")
+                    Logger.d(TAG, "Sending chunk ${index + 1}/${chunks.size} (isLast=$isLast)")
                     
-                    val wrappedLastChunk = "$lastChunk<end_of_turn>\n<start_of_turn>model\n"
-                    session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(wrappedLastChunk)))
-                    
-                    // 최종 답변 생성
-                    val finalResponse = session.runDecode()
-                    
-                    // 결과를 토큰 단위로 쪼개서 방출
-                    finalResponse.chunked(10).forEach { token ->
-                        emit(GenerationResult.Token(token))
-                    }
-                    emit(GenerationResult.Done)
-                } finally {
-                    session.close()
+                    // 고수준 API를 통해 메시지 전송
+                    executeGenerateSingle(conversation, listOf(wrappedPrompt), systemInstruction)
+                        .collect { result ->
+                            if (isLast) {
+                                // 마지막 청크의 응답만 사용자에게 방출
+                                emit(result)
+                            } else {
+                                // 중간 청크의 응답('ACK')은 로그만 남기고 버림
+                                if (result is GenerationResult.Token) {
+                                    Logger.d(TAG, "Model acknowledged chunk ${index + 1}")
+                                }
+                            }
+                        }
                 }
             }
-        } catch (e: Exception) {
-            Logger.e(TAG, "Error during chunked generation", e)
-            emit(GenerationResult.Error(e.message ?: "Unknown error"))
+        } finally {
+            conversation.close()
+            currentConversation = null
         }
     }
 
