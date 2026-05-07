@@ -269,7 +269,9 @@ class ModelInferenceManager(
                     session.runPrefill(lastInputData)
 
                     // 최종 답변 생성 (동기 방식인 runDecode 호출 후 Flow로 변환)
-                    val finalResponse = session.runDecode()
+                    val finalResponse = session.runDecode().apply {
+                        Logger.d(TAG, "finalResponse\n$this")
+                    }
 
                     // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과를 위해)
                     finalResponse.chunked(10).forEach { token ->
