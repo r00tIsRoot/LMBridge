@@ -237,43 +237,37 @@ class ModelInferenceManager(
                 // 세션 생성 (SamplerConfig는 기본값 사용)
                 val session = engine.createSession()
                 try {
-                    // 0. 시스템 지침을 가장 먼저 Prefill 하여 모델에 페르소나 부여
+                    // 0. 채팅 템플릿 적용: User 턴 시작 및 시스템 지침 전달
                     if (systemInstruction.isNotEmpty()) {
-                        Logger.d(TAG, "Prefilling system instruction")
-                        session.runPrefill(
-                            listOf(
-                                com.google.ai.edge.litertlm.InputData.Text(
-                                    systemInstruction
-                                )
-                            )
-                        )
+                        Logger.d(TAG, "Prefilling system instruction with chat template")
+                        val systemWrapped = "<start_of_turn>user\n$systemInstruction\n"
+                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(systemWrapped)))
+                    } else {
+                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text("<start_of_turn>user\n")))
                     }
 
                     val chunks = chunkTexts(flattenedTexts, maxNumTokens)
-
-                    // 마지막 청크 전까지는 Prefill만 수행
+                    
+                    // 마지막 청크 전까지는 Prefill만 수행 (사용자 입력 계속 추가)
                     for (i in 0 until chunks.size - 1) {
                         val chunk = chunks[i]
                         Logger.d(TAG, "Prefilling chunk ${i + 1}/${chunks.size}")
-
-                        // 텍스트 리스트를 InputData.Text 리스트로 변환하여 Prefill 수행
+                        
                         val inputData = chunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
                         session.runPrefill(inputData)
                     }
-
-                    // 마지막 청크: Prefill 후 Decode 수행
+                    
+                    // 마지막 청크: Prefill 후 User 턴을 닫고 Model 턴을 시작하여 Decode 트리거
                     val lastChunk = chunks.last()
                     Logger.d(TAG, "Processing final chunk ${chunks.size}/${chunks.size}")
-                    val lastInputData =
-                        lastChunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
-                    session.runPrefill(lastInputData)
-
-                    // 최종 답변 생성 (동기 방식인 runDecode 호출 후 Flow로 변환)
-                    val finalResponse = session.runDecode().apply {
-                        Logger.d(TAG, "finalResponse\n$this")
-                    }
-
-                    // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과를 위해)
+                    
+                    val wrappedLastChunk = "$lastChunk<end_of_turn>\n<start_of_turn>model\n"
+                    session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(wrappedLastChunk)))
+                    
+                    // 최종 답변 생성
+                    val finalResponse = session.runDecode()
+                    
+                    // 결과를 토큰 단위로 쪼개서 방출
                     finalResponse.chunked(10).forEach { token ->
                         emit(GenerationResult.Token(token))
                     }
