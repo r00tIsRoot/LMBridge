@@ -233,31 +233,44 @@ class ModelInferenceManager(
             } else {
                 // 2. True Chunking 구현: Session API를 사용하여 Prefill 분리
                 Logger.d(TAG, "Starting True Chunking for $totalTokens tokens")
-                
+
                 // 세션 생성 (SamplerConfig는 기본값 사용)
                 val session = engine.createSession()
                 try {
+                    // 0. 시스템 지침을 가장 먼저 Prefill 하여 모델에 페르소나 부여
+                    if (systemInstruction.isNotEmpty()) {
+                        Logger.d(TAG, "Prefilling system instruction")
+                        session.runPrefill(
+                            listOf(
+                                com.google.ai.edge.litertlm.InputData.Text(
+                                    systemInstruction
+                                )
+                            )
+                        )
+                    }
+
                     val chunks = chunkTexts(flattenedTexts, maxNumTokens)
-                    
+
                     // 마지막 청크 전까지는 Prefill만 수행
                     for (i in 0 until chunks.size - 1) {
                         val chunk = chunks[i]
                         Logger.d(TAG, "Prefilling chunk ${i + 1}/${chunks.size}")
-                        
+
                         // 텍스트 리스트를 InputData.Text 리스트로 변환하여 Prefill 수행
                         val inputData = chunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
                         session.runPrefill(inputData)
                     }
-                    
+
                     // 마지막 청크: Prefill 후 Decode 수행
                     val lastChunk = chunks.last()
                     Logger.d(TAG, "Processing final chunk ${chunks.size}/${chunks.size}")
-                    val lastInputData = lastChunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
+                    val lastInputData =
+                        lastChunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
                     session.runPrefill(lastInputData)
-                    
+
                     // 최종 답변 생성 (동기 방식인 runDecode 호출 후 Flow로 변환)
                     val finalResponse = session.runDecode()
-                    
+
                     // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과를 위해)
                     finalResponse.chunked(10).forEach { token ->
                         emit(GenerationResult.Token(token))

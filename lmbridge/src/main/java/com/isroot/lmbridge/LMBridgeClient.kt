@@ -25,8 +25,11 @@ class LMBridgeClient private constructor(
         inferenceManager.initialize()
     }
 
-    fun generate(prompt: String): Flow<GenerationResult> {
-        return inferenceManager.generate(prompt)
+    fun generate(
+        prompt: String,
+        systemInstruction: String = "You are a helpful AI assistant.",
+    ): Flow<GenerationResult> {
+        return inferenceManager.generate(prompt, systemInstruction)
     }
 
     fun generateWithImages(prompt: String, images: List<Bitmap>): Flow<GenerationResult> {
