@@ -8,6 +8,8 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.ToolProvider
@@ -45,6 +47,10 @@ class ModelInferenceManager(
             val modelFile = File(modelPath)
             if (modelFile.exists()) modelPath else extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
         }
+
+        // Enable MTP via speculative decoding
+        @OptIn(ExperimentalApi::class)
+        ExperimentalFlags.enableSpeculativeDecoding = true
 
         val engineConfig = EngineConfig(
             modelPath = finalModelPath,
@@ -236,20 +242,40 @@ class ModelInferenceManager(
         return (koreanChars / 2.0).toInt() + (englishChars / 4.0).toInt() + otherChars
     }
 
-    private fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
+    internal fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
         val estimatedTokens = estimateTokenCount(text)
         if (estimatedTokens <= maxTokens) return listOf(text)
 
         val chunks = mutableListOf<String>()
         val lines = text.split("\n")
-        val currentChunk = StringBuilder()
+        var currentChunk = StringBuilder()
         var currentTokens = 0
 
         for (line in lines) {
             val lineTokens = estimateTokenCount(line)
+            
+            // 한 줄 자체가 제한을 초과하는 경우 처리
+            if (lineTokens > maxTokens) {
+                // 현재까지 모인 청크가 있다면 먼저 저장
+                if (currentChunk.isNotEmpty()) {
+                    chunks.add(currentChunk.toString().trim())
+                    currentChunk = StringBuilder()
+                    currentTokens = 0
+                }
+                
+                // 긴 줄을 강제로 분할 (글자 수 기반으로 대략적 분할)
+                var remainingLine = line
+                while (remainingLine.isNotEmpty()) {
+                    val splitIdx = (maxTokens * 2).coerceAtMost(remainingLine.length) // 대략적인 글자수 기반 분할
+                    chunks.add(remainingLine.substring(0, splitIdx))
+                    remainingLine = remainingLine.substring(splitIdx)
+                }
+                continue
+            }
+
             if (currentTokens + lineTokens > maxTokens && currentChunk.isNotEmpty()) {
                 chunks.add(currentChunk.toString().trim())
-                currentChunk.clear()
+                currentChunk = StringBuilder()
                 currentTokens = 0
             }
             currentChunk.appendLine(line)
@@ -264,7 +290,9 @@ class ModelInferenceManager(
         prompt: String,
         systemInstruction: String,
     ): Flow<GenerationResult> = callbackFlow {
-        val chunks = splitByTokenLimit(prompt, maxNumTokens)
+        val chunks = splitByTokenLimit(prompt, maxNumTokens).apply {
+            Logger.d(TAG, "splitedChunk")
+        }
 
         if (chunks.size == 1) {
             generateSingle(conversation, listOf(prompt), systemInstruction).collect { result ->
