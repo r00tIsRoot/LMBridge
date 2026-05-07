@@ -221,9 +221,19 @@ class ModelInferenceManager(
     }
 
     private fun estimateTokenCount(text: String): Int {
-        val koreanChars = text.count { it.code in 0xAC00..0xD7A3 }
-        val otherChars = text.length - koreanChars
-        return koreanChars / 2 + otherChars / 4
+        var koreanChars = 0
+        var englishChars = 0
+        var otherChars = 0
+
+        for (char in text) {
+            when {
+                char.code in 0xAC00..0xD7A3 -> koreanChars++
+                char in 'a'..'z' || char in 'A'..'Z' -> englishChars++
+                else -> otherChars++
+            }
+        }
+
+        return (koreanChars / 2.0).toInt() + (englishChars / 4.0).toInt() + otherChars
     }
 
     private fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
