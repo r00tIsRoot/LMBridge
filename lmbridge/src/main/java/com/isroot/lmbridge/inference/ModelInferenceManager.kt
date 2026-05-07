@@ -262,7 +262,9 @@ class ModelInferenceManager(
                             if (isLast) {
                                 append("<end_of_turn>\n<start_of_turn>model\n")
                             }
-                        }.toString()
+                        }.toString().apply {
+                            Logger.d(TAG, "chunk wrappedText:\n$this")
+                        }
                         
                         Logger.d(TAG, "Prefilling chunk ${index + 1}/${chunks.size} (isFirst=$isFirst, isLast=$isLast)")
                         session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(wrappedText)))
