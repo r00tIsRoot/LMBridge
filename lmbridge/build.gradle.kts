@@ -39,8 +39,14 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // Google LiteRT-LM dependency - fixed version 0.10.0
+    // Google LiteRT-LM dependency - fixed version 0.11.0
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
+
+    // Android Instrumented Tests
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.1")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
 // Publishing configuration
