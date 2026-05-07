@@ -2,6 +2,7 @@ package com.isroot.lmbridge
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ToolProvider
 import com.isroot.lmbridge.download.ModelDownloadManager
 import com.isroot.lmbridge.inference.GenerationResult
@@ -25,63 +26,64 @@ class LMBridgeClient private constructor(
         inferenceManager.initialize()
     }
 
-    fun generate(
+    fun newConversation(
+        systemInstruction: String = "You are a helpful AI assistant.",
+        tools: List<ToolProvider> = emptyList()
+    ): Conversation {
+        return inferenceManager.createConversation(systemInstruction, tools)
+    }
+
+    fun generateWithConversation(
+        conversation: Conversation,
         prompt: String,
         systemInstruction: String = "You are a helpful AI assistant.",
     ): Flow<GenerationResult> {
-        return inferenceManager.generate(prompt, systemInstruction)
+        return inferenceManager.generate(prompt, conversation, systemInstruction)
+    }
+
+    fun generate(prompt: String): Flow<GenerationResult> {
+        return inferenceManager.generate(prompt = prompt)
     }
 
     fun generateWithImages(prompt: String, images: List<Bitmap>): Flow<GenerationResult> {
-        return inferenceManager.generateWithImages(prompt, images)
+        return inferenceManager.generateWithImages(prompt = prompt, images = images)
     }
 
     fun generateWithFiles(
         prompt: String,
         filePaths: List<String>,
     ): Flow<GenerationResult> {
-        return inferenceManager.generateWithFiles(prompt, filePaths)
+        return inferenceManager.generateWithFiles(prompt = prompt, filePaths = filePaths)
     }
 
     fun generateWithTools(
         prompt: String,
         tools: List<ToolProvider>,
     ): Flow<GenerationResult> {
-        return inferenceManager.generateWithTools(prompt, tools)
+        return inferenceManager.generateWithTools(prompt = prompt, tools = tools)
     }
 
-    fun generateWithInput(prompt: String, input: MultimodalInput): Flow<GenerationResult> = flow {
+    fun generateWithInput(input: MultimodalInput): Flow<GenerationResult> {
         val texts = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Text>()
-        val promptText = if (texts.isEmpty()) prompt else texts.joinToString(" ") { it.text }
+        val images = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Image>()
+        val audios = input.parts.filterIsInstance<com.isroot.lmbridge.models.MultimodalContent.Audio>()
 
-        val conversation = inferenceManager.createSession()
-        try {
-            val chunks = if (inferenceManager.estimateTokenCount(promptText) > maxNumTokens) {
-                inferenceManager.splitByTokenLimit(promptText, maxNumTokens)
-            } else {
-                listOf(promptText)
+        return when {
+            audios.isNotEmpty() -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generateWithAudio(prompt = prompt, audioBytesList = audios.map { it.bytes })
             }
-
-            if (chunks.size > 1) {
-                emit(GenerationResult.Token("Processing ${chunks.size} chunks...\n"))
+            images.isNotEmpty() -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generateWithImages(prompt = prompt, images = images.map { it.bitmap })
             }
-
-            chunks.forEachIndexed { index, chunk ->
-                if (chunks.size > 1) {
-                    emit(GenerationResult.Token("\n--- Chunk ${index + 1}/${chunks.size} ---\n"))
-                }
-
-                val chunkInput = input.copy(
-                    parts = input.parts.filter { it !is com.isroot.lmbridge.models.MultimodalContent.Text } + 
-                            com.isroot.lmbridge.models.MultimodalContent.Text(chunk)
-                )
-                
-                val resultFlow = inferenceManager.executeGenerate(conversation, chunkInput)
-                emitAll(resultFlow.filter { it !is GenerationResult.Done })
+            texts.size > 1 -> {
+                inferenceManager.generateWithTexts(texts = texts.map { it.text })
             }
-            emit(GenerationResult.Done)
-        } finally {
-            conversation.close()
+            else -> {
+                val prompt = texts.joinToString(" ") { it.text }
+                inferenceManager.generate(prompt = prompt)
+            }
         }
     }
 
@@ -90,7 +92,7 @@ class LMBridgeClient private constructor(
         audioBytes: ByteArray,
         systemInstruction: String = "You are a helpful AI assistant."
     ): Flow<GenerationResult> {
-        return inferenceManager.generateWithAudio(prompt, listOf(audioBytes), systemInstruction)
+        return inferenceManager.generateWithAudio(prompt = prompt, audioBytesList = listOf(audioBytes), systemInstruction = systemInstruction)
     }
 
     fun stopGeneration() {

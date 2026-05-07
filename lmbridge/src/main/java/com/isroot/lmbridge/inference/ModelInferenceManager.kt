@@ -18,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -30,11 +29,16 @@ class ModelInferenceManager(
     private val maxNumTokens: Int = 1024,
 ) {
     private var engine: Engine? = null
-    private var currentConversation: Conversation? = null
+
+    companion object {
+        private const val TAG = "ModelInferenceManager"
+        private const val DEFAULT_MODEL_FILE = "gemma-4-E2B-it.litertlm"
+        private const val DEFAULT_SYSTEM_INSTRUCTION = "You are a helpful AI assistant."
+    }
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
         Logger.d(TAG, "Initializing ModelInferenceManager...")
-        
+
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
             extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
         } else {
@@ -50,135 +54,179 @@ class ModelInferenceManager(
         engine = Engine(engineConfig).apply {
             initialize()
         }
-        Logger.d(TAG, "Engine initialized successfully")
+    }
+
+    private fun extractAssetIfNeeded(context: Context, assetFileName: String): String {
+        val outFile = File(context.filesDir, assetFileName)
+        if (!outFile.exists()) {
+            context.assets.open(assetFileName).use { inputStream ->
+                FileOutputStream(outFile).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+        }
+        return outFile.absolutePath
+    }
+
+    fun createConversation(
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+        tools: List<ToolProvider> = emptyList()
+    ): Conversation {
+        Logger.d(TAG, "Creating new conversation session")
+        val config = ConversationConfig(
+            systemInstruction = Contents.of(systemInstruction),
+            tools = tools
+        )
+        return engine?.createConversation(config)
+            ?: throw IllegalStateException("Engine not initialized")
     }
 
     fun generate(
         prompt: String,
+        conversation: Conversation? = null,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = generateChunked(listOf(prompt), systemInstruction)
+    ): Flow<GenerationResult> {
+        val conv = conversation ?: createConversation(systemInstruction)
+        return processChunkedGenerate(conv, prompt, systemInstruction)
+    }
 
     fun generateWithTexts(
         texts: List<String>,
+        conversation: Conversation? = null,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = generateChunked(texts, systemInstruction)
+    ): Flow<GenerationResult> {
+        val conv = conversation ?: createConversation(systemInstruction)
+        return generateSingle(conv, texts, systemInstruction)
+    }
+
+    private fun generateSingle(
+        conversation: Conversation,
+        texts: List<String>,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> = callbackFlow {
+        val contents = texts.map { Content.Text(it) }
+
+        conversation.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            }
+        )
+        awaitClose { conversation.cancelProcess() }
+    }
 
     fun generateWithImages(
         prompt: String,
         images: List<Bitmap>,
+        conversation: Conversation? = null,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        try {
-            emitAll(executeGenerateWithImages(conversation, prompt, images))
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
+    ): Flow<GenerationResult> = callbackFlow {
+        val conv = conversation ?: createConversation(systemInstruction)
+        val contents = mutableListOf<Content>()
+        images.forEach { bitmap -> contents.add(Content.ImageBytes(bitmap.toPngBytes())) }
+        contents.add(Content.Text(prompt))
+
+        conv.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            }
+        )
+        awaitClose { conv.cancelProcess() }
     }
 
     fun generateWithAudio(
         prompt: String,
         audioBytesList: List<ByteArray>,
+        conversation: Conversation? = null,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        try {
-            emitAll(executeGenerateWithAudio(conversation, prompt, audioBytesList))
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
+    ): Flow<GenerationResult> = callbackFlow {
+        val conv = conversation ?: createConversation(systemInstruction)
+        val contents = mutableListOf<Content>()
+        audioBytesList.forEach { bytes -> contents.add(Content.AudioBytes(bytes)) }
+        contents.add(Content.Text(prompt))
+
+        conv.sendMessageAsync(
+            Contents.of(contents),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
+            }
+        )
+        awaitClose { conv.cancelProcess() }
     }
 
     fun generateWithTools(
         prompt: String,
         tools: List<ToolProvider>,
+        conversation: Conversation? = null,
         systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(
-            systemInstruction = Contents.of(systemInstruction),
-            tools = tools,
-        )
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
-        try {
-            emitAll(executeGenerateWithTools(conversation, prompt))
-        } finally {
-            conversation.close()
-            currentConversation = null
-        }
-    }
+    ): Flow<GenerationResult> = callbackFlow {
+        val conv = conversation ?: createConversation(systemInstruction, tools)
 
-    fun generateWithFiles(
-        prompt: String,
-        filePaths: List<String>,
-        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val fileContents = filePaths.mapNotNull { path ->
-            try {
-                val file = File(path)
-                if (file.exists()) file.readText() else null
-            } catch (e: Exception) {
-                Logger.e(TAG, "Failed to read file: $path", e)
-                null
+        conv.sendMessageAsync(
+            Contents.of(prompt),
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    trySend(GenerationResult.Token(message.toString()))
+                }
+                override fun onDone() {
+                    trySend(GenerationResult.Done)
+                    close()
+                }
+                override fun onError(throwable: Throwable) {
+                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
+                    close()
+                }
             }
-        }
-
-        val contextPrompt = if (fileContents.isNotEmpty()) {
-            """
-            |Based on the following document content, answer the question.
-            |
-            |Document content:
-            |${fileContents.joinToString("\n\n---\n\n")}
-            |
-            |Question: $prompt
-            """.trimMargin()
-        } else {
-            prompt
-        }
-        emitAll(generateChunked(listOf(contextPrompt), systemInstruction))
+        )
+        awaitClose { conv.cancelProcess() }
     }
 
-    fun stopGeneration() {
-        currentConversation?.cancelProcess()
+    fun stopGeneration(conversation: Conversation? = null) {
+        conversation?.cancelProcess()
     }
 
     fun close() {
-        currentConversation?.close()
         engine?.close()
     }
 
-    internal fun createSession(systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION): Conversation {
-        val engine = this.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        return engine.createConversation(config)
+    private fun estimateTokenCount(text: String): Int {
+        val koreanChars = text.count { it.code in 0xAC00..0xD7A3 }
+        val otherChars = text.length - koreanChars
+        return koreanChars / 2 + otherChars / 4
     }
 
-    internal fun estimateTokenCount(text: String): Int {
-        var koreanChars = 0
-        var englishChars = 0
-        var otherChars = 0
-
-        for (char in text) {
-            when {
-                char.code in 0xAC00..0xD7A3 -> koreanChars++
-                char in 'a'..'z' || char in 'A'..'Z' -> englishChars++
-                else -> otherChars++
-            }
-        }
-        
-        return (koreanChars / 2.0).toInt() + (englishChars / 4.0).toInt() + otherChars
-    }
-
-    internal fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
+    private fun splitByTokenLimit(text: String, maxTokens: Int): List<String> {
         val estimatedTokens = estimateTokenCount(text)
         if (estimatedTokens <= maxTokens) return listOf(text)
 
@@ -201,262 +249,68 @@ class ModelInferenceManager(
         return chunks
     }
 
-    private fun generateChunked(
-        texts: List<String>,
+    private fun processChunkedGenerate(
+        conversation: Conversation,
+        prompt: String,
         systemInstruction: String,
-    ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
-        val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        
-        try {
-            // 1. 개별 문자열이 너무 길면 먼저 쪼개서 평탄화함
-            val flattenedTexts = texts.flatMap { text ->
-                if (estimateTokenCount(text) > maxNumTokens) {
-                    splitByTokenLimit(text, maxNumTokens)
+    ): Flow<GenerationResult> = callbackFlow {
+        val chunks = splitByTokenLimit(prompt, maxNumTokens)
+
+        if (chunks.size == 1) {
+            generateSingle(conversation, listOf(prompt), systemInstruction).collect { result ->
+                trySend(result)
+            }
+        } else {
+            trySend(GenerationResult.Token("Processing ${chunks.size} chunks...\n"))
+            for ((index, chunk) in chunks.withIndex()) {
+                trySend(GenerationResult.Token("\n--- Chunk ${index + 1}/${chunks.size} ---\n"))
+                generateSingle(conversation, listOf(chunk), systemInstruction).collect { result ->
+                    if (result !is GenerationResult.Done) trySend(result)
+                }
+            }
+            trySend(GenerationResult.Done)
+            close()
+        }
+    }
+
+    fun generateWithFiles(
+        prompt: String,
+        filePaths: List<String>,
+        conversation: Conversation? = null,
+        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
+    ): Flow<GenerationResult> {
+        val fileContents = filePaths.mapNotNull { path ->
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    Logger.d(TAG, "Reading file: $path (${file.length()} bytes)")
+                    file.readText()
                 } else {
-                    listOf(text)
+                    Logger.w(TAG, "File not found: $path")
+                    null
                 }
-            }
-            
-            val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }
-            
-            if (totalTokens <= maxNumTokens) {
-                // 단일 요청인 경우 기존의 고수준 API 사용 (최적화됨)
-                val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-                val conversation = engine.createConversation(config)
-                currentConversation = conversation
-                try {
-                    emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
-                } finally {
-                    conversation.close()
-                    currentConversation = null
-                }
-            } else {
-                // 2. 완성형 True Chunking 구현: Session API + 정밀 템플릿 주입
-                Logger.d(TAG, "Starting Advanced True Chunking for $totalTokens tokens")
-                
-                // 결정론적 응답을 위한 SamplerConfig 설정 (Temperature = 0)
-                val samplerConfig = com.google.ai.edge.litertlm.SamplerConfig(
-                    temperature = 0.0,
-                    topK = 1,
-                    topP = 1.0
-                )
-                val sessionConfig = com.google.ai.edge.litertlm.SessionConfig(samplerConfig = samplerConfig)
-                val session = engine.createSession(sessionConfig)
-                
-                try {
-                    val chunks = chunkTexts(flattenedTexts, maxNumTokens)
-                    
-                    chunks.forEachIndexed { index, chunk ->
-                        val isFirst = index == 0
-                        val isLast = index == chunks.size - 1
-                        
-                        // Gemma 채팅 템플릿을 적용하여 입력 텍스트 구성
-                        val wrappedText = StringBuilder().apply {
-                            if (isFirst) {
-                                append("<start_of_turn>user\n")
-                                if (systemInstruction.isNotEmpty()) {
-                                    append(systemInstruction).append("\n")
-                                }
-                            }
-                            append(chunk.joinToString("\\n"))
-                            if (isLast) {
-                                append("<end_of_turn>\n<start_of_turn>model\n")
-                            }
-                        }.toString().apply {
-                            Logger.d(TAG, "chunk wrappedText:\n$this")
-                        }
-                        
-                        Logger.d(TAG, "Prefilling chunk ${index + 1}/${chunks.size} (isFirst=$isFirst, isLast=$isLast)")
-                        session.runPrefill(listOf(com.google.ai.edge.litertlm.InputData.Text(wrappedText)))
-                    }
-                    
-                    // 모든 컨텍스트가 주입되었으므로, 단 한 번의 Decode 수행
-                    Logger.d(TAG, "All chunks prefilled. Executing final decode.")
-                    val finalResponse = session.runDecode().apply {
-                        Logger.d(TAG, "finalResponse: $this")
-                    }
-                    
-                    // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과 유지)
-                    finalResponse.chunked(10).forEach { token ->
-                        emit(GenerationResult.Token(token))
-                    }
-                    emit(GenerationResult.Done)
-                } finally {
-                    session.close()
-                }
-            }
-        } catch (e: Exception) {
-            Logger.e(TAG, "Error during chunked generation", e)
-            emit(GenerationResult.Error(e.message ?: "Unknown error"))
-        }
-    }
-
-    private fun chunkTexts(texts: List<String>, maxTokens: Int): List<List<String>> {
-        val chunks = mutableListOf<List<String>>()
-        var currentChunk = mutableListOf<String>()
-        var currentTokens = 0
-        for (text in texts) {
-            val tokens = estimateTokenCount(text)
-            if (currentTokens + tokens > maxTokens && currentChunk.isNotEmpty()) {
-                chunks.add(currentChunk)
-                currentChunk = mutableListOf()
-                currentTokens = 0
-            }
-            currentChunk.add(text)
-            currentTokens += tokens
-        }
-        if (currentChunk.isNotEmpty()) chunks.add(currentChunk)
-        return chunks
-    }
-
-    internal fun executeGenerate(
-        conversation: Conversation,
-        input: com.isroot.lmbridge.models.MultimodalInput,
-        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = callbackFlow {
-        val contents = input.parts.map { it.convertToContent() }
-        
-        conversation.sendMessageAsync(
-            Contents.of(contents),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-                override fun onDone() {
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Generation error", throwable)
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-        awaitClose { conversation.cancelProcess() }
-    }
-
-    internal fun executeGenerateSingle(
-        conversation: Conversation,
-        texts: List<String>,
-        systemInstruction: String = DEFAULT_SYSTEM_INSTRUCTION,
-    ): Flow<GenerationResult> = callbackFlow {
-        val contents = texts.map { Content.Text(it) }
-        conversation.sendMessageAsync(
-            Contents.of(contents),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-                override fun onDone() {
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-                override fun onError(throwable: Throwable) {
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-        awaitClose { conversation.cancelProcess() }
-    }
-
-    internal fun executeGenerateWithImages(
-        conversation: Conversation,
-        prompt: String,
-        images: List<Bitmap>,
-    ): Flow<GenerationResult> = callbackFlow {
-        val contents = mutableListOf<Content>()
-        images.forEach { bitmap -> contents.add(Content.ImageBytes(bitmap.toPngBytes())) }
-        contents.add(Content.Text(prompt))
-        conversation.sendMessageAsync(
-            Contents.of(contents),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-                override fun onDone() {
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Multimodal generation error", throwable)
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-        awaitClose { conversation.cancelProcess() }
-    }
-
-    internal fun executeGenerateWithAudio(
-        conversation: Conversation,
-        prompt: String,
-        audioBytesList: List<ByteArray>,
-    ): Flow<GenerationResult> = callbackFlow {
-        val contents = mutableListOf<Content>()
-        audioBytesList.forEach { bytes -> contents.add(Content.AudioBytes(bytes)) }
-        contents.add(Content.Text(prompt))
-        conversation.sendMessageAsync(
-            Contents.of(contents),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-                override fun onDone() {
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Multimodal generation error", throwable)
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-        awaitClose { conversation.cancelProcess() }
-    }
-
-    internal fun executeGenerateWithTools(
-        conversation: Conversation,
-        prompt: String,
-    ): Flow<GenerationResult> = callbackFlow {
-        conversation.sendMessageAsync(
-            Contents.of(prompt),
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    trySend(GenerationResult.Token(message.toString()))
-                }
-                override fun onDone() {
-                    trySend(GenerationResult.Done)
-                    close()
-                }
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Tool calling error", throwable)
-                    trySend(GenerationResult.Error(throwable.message ?: "Unknown error"))
-                    close()
-                }
-            },
-        )
-        awaitClose { conversation.cancelProcess() }
-    }
-
-    private fun extractAssetIfNeeded(context: Context, assetFileName: String): String {
-        val outFile = File(context.filesDir, assetFileName)
-        if (!outFile.exists()) {
-            context.assets.open(assetFileName).use { inputStream ->
-                FileOutputStream(outFile).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
+            } catch (e: Exception) {
+                Logger.e(TAG, "Failed to read file: $path", e)
+                null
             }
         }
-        return outFile.absolutePath
-    }
 
-    companion object {
-        private const val TAG = "ModelInferenceManager"
-        private const val DEFAULT_MODEL_FILE = "gemma-4-E2B-it.litertlm"
-        private const val DEFAULT_SYSTEM_INSTRUCTION = "You are a helpful AI assistant."
+        val contextPrompt = if (fileContents.isNotEmpty()) {
+            """
+            |Based on the following document content, answer the question.
+            |
+            |Document content:
+            |${fileContents.joinToString("\n\n---\n\n")}
+            |
+            |Question: $prompt
+            """.trimMargin()
+        } else {
+            prompt
+        }
+
+        Logger.d(TAG, "generateWithFiles: ${filePaths.size} files, prompt length: ${contextPrompt.length}")
+        val conv = conversation ?: createConversation(systemInstruction)
+        return processChunkedGenerate(conv, contextPrompt, systemInstruction)
     }
 }
 
