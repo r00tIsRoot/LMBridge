@@ -18,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -207,9 +206,6 @@ class ModelInferenceManager(
         systemInstruction: String,
     ): Flow<GenerationResult> = kotlinx.coroutines.flow.flow {
         val engine = this@ModelInferenceManager.engine ?: throw IllegalStateException("Engine not initialized")
-        val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        val conversation = engine.createConversation(config)
-        currentConversation = conversation
         
         try {
             // 1. 개별 문자열이 너무 길면 먼저 쪼개서 평탄화함
@@ -221,34 +217,59 @@ class ModelInferenceManager(
                 }
             }
             
-            val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }.apply {
-                Logger.d("LMBridge", "tokenCount: $this")
-            }
+            val totalTokens = flattenedTexts.sumOf { estimateTokenCount(it) }
+            
             if (totalTokens <= maxNumTokens) {
-                emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
-            } else {
-                // 2. 쪼개진 문자열들을 다시 maxNumTokens 단위로 묶어서 청크 생성
-                val chunks = chunkTexts(flattenedTexts, maxNumTokens)
-                val fullResult = StringBuilder()
-                
-                chunks.forEachIndexed { index, chunk ->
-                    Logger.d(TAG, "Processing chunk ${index + 1}/${chunks.size}")
-                    executeGenerateSingle(conversation, chunk, systemInstruction)
-                        .collect { result ->
-                            if (result is GenerationResult.Token) {
-                                fullResult.append(result.text)
-                            } else if (result is GenerationResult.Done) {
-                                Logger.d(TAG, "Chunk ${index + 1} done")
-                            }
-                        }
+                // 단일 요청인 경우 기존의 고수준 API 사용
+                val config = ConversationConfig(systemInstruction = Contents.of(systemInstruction))
+                val conversation = engine.createConversation(config)
+                currentConversation = conversation
+                try {
+                    emitAll(executeGenerateSingle(conversation, flattenedTexts, systemInstruction))
+                } finally {
+                    conversation.close()
+                    currentConversation = null
                 }
-                Logger.d(TAG, "All chunks processed. Emitting final result.")
-                emit(GenerationResult.Token(fullResult.toString()))
-                emit(GenerationResult.Done)
+            } else {
+                // 2. True Chunking 구현: Session API를 사용하여 Prefill 분리
+                Logger.d(TAG, "Starting True Chunking for $totalTokens tokens")
+                
+                // 세션 생성 (SamplerConfig는 기본값 사용)
+                val session = engine.createSession()
+                try {
+                    val chunks = chunkTexts(flattenedTexts, maxNumTokens)
+                    
+                    // 마지막 청크 전까지는 Prefill만 수행
+                    for (i in 0 until chunks.size - 1) {
+                        val chunk = chunks[i]
+                        Logger.d(TAG, "Prefilling chunk ${i + 1}/${chunks.size}")
+                        
+                        // 텍스트 리스트를 InputData.Text 리스트로 변환하여 Prefill 수행
+                        val inputData = chunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
+                        session.runPrefill(inputData)
+                    }
+                    
+                    // 마지막 청크: Prefill 후 Decode 수행
+                    val lastChunk = chunks.last()
+                    Logger.d(TAG, "Processing final chunk ${chunks.size}/${chunks.size}")
+                    val lastInputData = lastChunk.map { com.google.ai.edge.litertlm.InputData.Text(it) }
+                    session.runPrefill(lastInputData)
+                    
+                    // 최종 답변 생성 (동기 방식인 runDecode 호출 후 Flow로 변환)
+                    val finalResponse = session.runDecode()
+                    
+                    // 결과를 토큰 단위로 쪼개서 방출 (UI 스트리밍 효과를 위해)
+                    finalResponse.chunked(10).forEach { token ->
+                        emit(GenerationResult.Token(token))
+                    }
+                    emit(GenerationResult.Done)
+                } finally {
+                    session.close()
+                }
             }
-        } finally {
-            conversation.close()
-            currentConversation = null
+        } catch (e: Exception) {
+            Logger.e(TAG, "Error during chunked generation", e)
+            emit(GenerationResult.Error(e.message ?: "Unknown error"))
         }
     }
 
