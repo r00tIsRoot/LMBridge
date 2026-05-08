@@ -41,6 +41,17 @@ class ModelInferenceManager(
     suspend fun initialize() = withContext(Dispatchers.IO) {
         Logger.d(TAG, "Initializing ModelInferenceManager...")
 
+        try {
+            // 샘플러 라이브러리들이 참조하는 메인 엔진 심볼들을 메모리에 먼저 올립니다.
+            System.loadLibrary("LiteRt")
+            System.loadLibrary("litertlm_jni")
+            Logger.d(TAG, "Main engine libraries loaded successfully")
+        } catch (e: UnsatisfiedLinkError) {
+            Logger.e(TAG, "Failed to load main engine libraries", e)
+            // 필수 라이브러리 로드 실패 시 초기화 중단
+            throw e
+        }
+
         val finalModelPath = if (modelPath.isNullOrEmpty()) {
             extractAssetIfNeeded(context, DEFAULT_MODEL_FILE)
         } else {
