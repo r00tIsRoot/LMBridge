@@ -53,7 +53,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts (app)
 dependencies {
-    implementation("com.isroot:lmbridge:0.0.11")
+    implementation("com.isroot:lmbridge:0.2.0")
 }
 ```
 
@@ -67,23 +67,32 @@ val client = LMBridgeClient.Builder(context)
     .setModelPath("/path/to/model.litertlm")  // 선택사항, 설정하지 않으면 asset 사용
     .build()
 
-// 2. 초기화 (비동기)
+// 2. 초기화 (비동기, 멱등)
 lifecycleScope.launch {
     client.initialize()
-    
-    // 3. 텍스트 생성 (스트리밍)
-    client.generate("안녕하세요").collect { result ->
-        when (result) {
-            is GenerationResult.Token -> print(result.text)
-            is GenerationResult.Done -> println("\n[완료]")
-            is GenerationResult.Error -> println("[오류: ${result.message}]")
+
+    // 3. 텍스트 생성 (스트리밍) — Flow<GenerationChunk>
+    client.generate("안녕하세요").collect { chunk ->
+        when (chunk) {
+            is GenerationChunk.Token -> print(chunk.text)
+            is GenerationChunk.ToolCall -> println("[도구호출: ${chunk.name} ${chunk.argsJson}]")
+            is GenerationChunk.Done -> println("\n[완료]")
+            is GenerationChunk.Error -> println("[오류: ${chunk.error.message}]")
         }
     }
-    
+
     // 4. 정리
     client.release()
 }
+
+// 진행 중 생성 취소
+client.stop()
 ```
+
+> ⚠️ **v2 파괴적 변경**: 공개 API에서 litertlm 타입을 제거했습니다.
+> `Flow<GenerationResult>` → `Flow<GenerationChunk>`, `newConversation()` → `newChat()`,
+> `stopGeneration()` → `stop()`. 구 메서드는 `@Deprecated`로 한 사이클 유지됩니다.
+> 자세한 배경은 [docs/](docs/README.md)와 [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) 참고.
 
 ## API 참조
 
@@ -91,24 +100,34 @@ lifecycleScope.launch {
 
 | 메서드 | 설명 |
 |--------|------|
-| `initialize()` | LLM 엔진 초기화 |
-| `generate(prompt)` | 텍스트만 생성 |
-| `generateWithImages(prompt, images)` | 멀티모달 (텍스트 + 이미지) 추론 |
-| `generateWithAudio(prompt, audioBytes)` | 멀티모달 (텍스트 + 오디오) 추론 |
-| `generateWithTools(prompt, tools)` | 도구 호출 지원 생성 |
-| `generateWithInput(input)` | `MultimodalInput`을 통한 통합 추론 |
-| `generateWithFiles(prompt, filePaths)` | 파일 내용을 컨텍스트로 포함하여 생성 |
-| `stopGeneration()` | 진행 중인 모든 생성 취소 |
+| `initialize()` | LLM 엔진 초기화 (멱등, off-main) |
+| `generate(prompt)` | 텍스트 단발 생성 → `Flow<GenerationChunk>` |
+| `generate(input)` | `MultimodalInput`(텍스트·이미지·오디오·문서 혼합) 단발 생성 |
+| `newChat(config)` | 상태 유지 대화 세션([Chat]) 생성 |
+| `stop()` | 진행 중인 단발 생성 취소 |
 | `release()` | 모든 리소스 및 엔진 해제 |
-| `getDownloadManager()` | 모델 다운로드 관리자 가져오기 |
+| `models` | 모델 다운로드 관리자(`ModelDownloadManager`) |
 
-### GenerationResult
+구 메서드(`generateWithImages/Audio/Files/Input`, `stopGeneration`, `getDownloadManager`,
+`close`)는 `@Deprecated`로 유지되며 새 API로 위임합니다.
+
+### Chat (상태 유지 대화)
 
 ```kotlin
-sealed class GenerationResult {
-    data class Token(val text: String) : GenerationResult()  // 스트리밍 토큰
-    data object Done : GenerationResult()                     // 생성 완료
-    data class Error(val message: String) : GenerationResult() // 오류 발생
+val chat = client.newChat(ChatConfig(systemInstruction = "너는 친절한 도우미야."))
+chat.send("안녕").collect { chunk -> /* ... */ }
+chat.send("방금 뭐라고 했지?").collect { chunk -> /* 히스토리 유지 */ }
+chat.close()
+```
+
+### GenerationChunk
+
+```kotlin
+sealed interface GenerationChunk {
+    data class Token(val text: String) : GenerationChunk       // 스트리밍 토큰
+    data class ToolCall(val name: String, val argsJson: String) : GenerationChunk  // 도구 호출
+    data object Done : GenerationChunk                          // 생성 완료
+    data class Error(val error: LMBridgeError) : GenerationChunk // 타입화된 오류
 }
 ```
 
@@ -122,10 +141,14 @@ sealed class DownloadStatus {
         val receivedBytes: Long,
         val progressPercent: Int
     ) : DownloadStatus()
-    data class Failed(val message: String) : DownloadStatus()
+    data object Verifying : DownloadStatus()                    // SHA-256 무결성 검증 중
+    data class Failed(val message: String, val error: LMBridgeError? = null) : DownloadStatus()
     data class Completed(val filePath: String) : DownloadStatus()
 }
 ```
+
+다운로드는 `.part` 임시 파일로 받아 **이어받기**를 지원하고, 완료 후 SHA-256(제공 시)
+또는 크기를 검증한 뒤에만 최종 파일로 승격합니다.
 
 ### MultimodalInput
 
@@ -143,50 +166,54 @@ val input = MultimodalInput.textAndImages("이 이미지를 설명해줘", listO
 
 ```kotlin
 lifecycleScope.launch {
-    client.generate("봄에 관한 하이쿠를 작성해줘:").collect { result ->
-        when (result) {
-            is GenerationResult.Token -> appendToTextView(result.text)
-            is GenerationResult.Done -> showCompletionMessage()
-            is GenerationResult.Error -> showError(result.message)
+    client.generate("봄에 관한 하이쿠를 작성해줘:").collect { chunk ->
+        when (chunk) {
+            is GenerationChunk.Token -> appendToTextView(chunk.text)
+            is GenerationChunk.Done -> showCompletionMessage()
+            is GenerationChunk.Error -> showError(chunk.error.message ?: "오류")
+            is GenerationChunk.ToolCall -> handleToolCall(chunk.name, chunk.argsJson)
         }
     }
 }
 ```
 
-### 멀티모달 추론 (이미지 및 오디오)
+### 멀티모달 추론 (이미지·오디오 혼합)
 
 ```kotlin
 lifecycleScope.launch {
-    // 이미지 추론
-    val images = listOf(cameraBitmap)
-    client.generateWithImages("이 이미지의 분위기를 설명해줘", images).collect { ... }
-    
-    // 오디오 추론
-    val audioData = audioRecorder.getAudioBytes()
-    client.generateWithAudio("이 오디오 파일의 내용을 요약해줘", audioData).collect { ... }
+    // 텍스트 + 이미지 + 오디오를 순서대로 혼합
+    val input = MultimodalInput.Builder()
+        .image(cameraBitmap)
+        .audio(audioRecorder.getAudioBytes())
+        .text("이 사진과 소리를 함께 설명해줘")
+        .build()
+    client.generate(input).collect { chunk -> /* ... */ }
+
+    // 편의 팩토리
+    client.generate(MultimodalInput.textAndImages("이 이미지 설명해줘", listOf(bitmap)))
+        .collect { chunk -> /* ... */ }
 }
 ```
 
 ### 도구 호출
 
 ```kotlin
-val weatherTool = ToolProvider.builder()
-    .addTools(
-        Tool.create(
-            name = "get_weather",
-            description = "위치의 현재 날씨 가져오기",
-            params = listOf(
-                Tool.Param(name = "location", type = "string", required = true)
-            )
-        )
-    )
+val weatherTool = Tool.builder("get_weather", "위치의 현재 날씨 가져오기")
+    .param("location", type = "string", description = "도시명", required = true)
+    // (선택) 자동 실행 핸들러 — 없으면 GenerationChunk.ToolCall로 앱에 전달됨
+    .executor { args -> """{"temp": 24, "sky": "맑음"}""" }
     .build()
 
 lifecycleScope.launch {
-    client.generateWithTools("서울 날씨 어때?", listOf(weatherTool))
-        .collect { result ->
-            // 응답 처리
+    val chat = client.newChat(ChatConfig(tools = listOf(weatherTool)))
+    chat.send("서울 날씨 어때?").collect { chunk ->
+        when (chunk) {
+            is GenerationChunk.ToolCall -> { /* 앱이 직접 처리하는 경우 */ }
+            is GenerationChunk.Token -> print(chunk.text)
+            else -> {}
         }
+    }
+    chat.close()
 }
 ```
 
@@ -194,21 +221,22 @@ lifecycleScope.launch {
 
 ```kotlin
 // 사용자가 취소 버튼을 탭
-client.stopGeneration()
+client.stop()          // 단발 생성
+// 또는 대화 세션: chat.stop()
 ```
 
 ## 백엔드 설정
 
-SDK는 기본적으로 CPU 백엔드를 사용합니다. `ModelInferenceManager`에서 수정할 수 있습니다:
+기본은 CPU입니다. 빌더에서 백엔드를 지정합니다:
 
 ```kotlin
-val engineConfig = EngineConfig(
-    modelPath = finalModelPath,
-    backend = Backend.CPU(),  // 옵션: NPU(), CPU(), GPU()
-)
+val client = LMBridgeClient.Builder(context)
+    .setBackend(LMBridge.Backend.GPU)  // 옵션: CPU, GPU, NPU
+    .build()
 ```
 
-NPU의 경우 네이티브 라이브러리 디렉토리가 자동으로 감지됩니다. 다른 백엔드의 경우 특별한 설정이 필요하지 않습니다.
+GPU(OpenCL)/NPU 네이티브 라이브러리는 라이브러리 매니페스트에 `required="false"`로 선언되어
+있어, 미지원 기기에서도 설치가 가능합니다. (AUTO 자동 폴백은 로드맵 M3 예정 — [docs/05-roadmap.md](docs/05-roadmap.md))
 
 ## 모델 파일
 
@@ -247,7 +275,7 @@ val deepseekR1 = ModelCatalog.DEEPSEEK_R1_DISTILL_QWEN_1_5B  // 1.8GB
 
 ```kotlin
 val client = LMBridgeClient.Builder(context).build()
-val downloadManager = client.getDownloadManager()
+val downloadManager = client.models
 
 lifecycleScope.launch {
     // 모델이 이미 다운로드되었는지 확인
@@ -256,24 +284,16 @@ lifecycleScope.launch {
         downloadManager.downloadModel(ModelCatalog.GEMMA_4_E2B_IT)
             .collect { status ->
                 when (status) {
-                    is ModelDownloadManager.DownloadStatus.NotStarted -> {
-                        println("다운로드 시작...")
-                    }
-                    is ModelDownloadManager.DownloadStatus.Downloading -> {
-                        println("진행률: ${status.progressPercent}%")
-                        println("다운로드: ${status.receivedBytes / 1024 / 1024}MB / ${status.totalBytes / 1024 / 1024}MB")
-                    }
-                    is ModelDownloadManager.DownloadStatus.Completed -> {
-                        println("다운로드 완료: ${status.filePath}")
-                    }
-                    is ModelDownloadManager.DownloadStatus.Failed -> {
-                        println("실패: ${status.message}")
-                    }
+                    is ModelDownloadManager.DownloadStatus.NotStarted -> println("다운로드 시작...")
+                    is ModelDownloadManager.DownloadStatus.Downloading ->
+                        println("진행률: ${status.progressPercent}% (${status.receivedBytes / 1024 / 1024}MB / ${status.totalBytes / 1024 / 1024}MB)")
+                    is ModelDownloadManager.DownloadStatus.Verifying -> println("무결성 검증 중...")
+                    is ModelDownloadManager.DownloadStatus.Completed -> println("완료: ${status.filePath}")
+                    is ModelDownloadManager.DownloadStatus.Failed -> println("실패: ${status.message}")
                 }
             }
     }
-    
-    // 다운로드된 모델 경로 가져오기
+
     val modelPath = downloadManager.getModelPath(ModelCatalog.GEMMA_4_E2B_IT)
     println("모델 경로: $modelPath")
 }
@@ -283,17 +303,14 @@ lifecycleScope.launch {
 
 ```kotlin
 lifecycleScope.launch {
-    val downloadManager = client.getDownloadManager()
-    val modelPath = downloadManager.getModelPath(ModelCatalog.GEMMA_4_E2B_IT)
-    
-    if (modelPath != null) {
-        // 다운로드된 모델로 클라이언트 생성
-        val inferenceClient = LMBridgeClient.Builder(context)
-            .setModelPath(modelPath)
-            .build()
-        
-        inferenceClient.initialize().collect { /* ... */ }
-    }
+    // 카탈로그 모델을 지정하면 initialize()가 로컬 다운로드본을 자동으로 찾아 로드
+    val inferenceClient = LMBridgeClient.Builder(context)
+        .setModel(ModelCatalog.GEMMA_4_E2B_IT)
+        .build()
+    inferenceClient.initialize()   // suspend — 미다운로드 시 ModelNotFound 예외
+
+    // 또는 경로를 직접 지정
+    val modelPath = inferenceClient.models.getModelPath(ModelCatalog.GEMMA_4_E2B_IT)
 }
 ```
 
@@ -335,7 +352,7 @@ lifecycleScope.launch {
 - `androidx.core:core-ktx:1.15.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0`
-- `com.google.ai.edge.litertlm:litertlm-android:0.10.0`
+- `com.google.ai.edge.litertlm:litertlm-android:0.11.0`
 
 ## 라이선스
 
