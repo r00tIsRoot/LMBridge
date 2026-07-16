@@ -1,15 +1,6 @@
 package com.isroot.lmbridge
 
 import android.util.Log
-import com.google.ai.edge.litertlm.Backend as LiteRtBackend
-
-fun convertToLiteRtBackend(backend: LMBridge.Backend): LiteRtBackend {
-    return when (backend) {
-        LMBridge.Backend.CPU -> LiteRtBackend.CPU()
-        LMBridge.Backend.GPU -> LiteRtBackend.GPU()
-        LMBridge.Backend.NPU -> LiteRtBackend.NPU()
-    }
-}
 
 object LMBridge {
     enum class Backend {

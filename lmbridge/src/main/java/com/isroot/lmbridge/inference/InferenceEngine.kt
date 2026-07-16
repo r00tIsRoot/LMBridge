@@ -1,0 +1,47 @@
+package com.isroot.lmbridge.inference
+
+import com.isroot.lmbridge.LMBridge
+import com.isroot.lmbridge.models.ChatConfig
+import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.MultimodalContent
+import kotlinx.coroutines.flow.Flow
+
+/**
+ * 추론 엔진 어댑터 경계.
+ *
+ * 상위 레이어(Facade/Domain)는 이 인터페이스만 참조하며 litertlm 타입을 알지 못한다.
+ * 구현체([LiteRtEngineAdapter])만 `com.google.ai.edge.litertlm.*`를 import한다.
+ */
+internal interface InferenceEngine {
+    val isInitialized: Boolean
+
+    /** 엔진을 초기화한다. 멱등이 아니며, 호출자(Facade)가 상태를 관리한다. */
+    suspend fun initialize(init: EngineInit)
+
+    /** 새 대화 세션을 생성한다. */
+    fun newSession(config: ChatConfig): EngineSession
+
+    /** 엔진과 모든 자원을 해제한다. */
+    fun close()
+}
+
+/** 하나의 대화 세션(litertlm `Conversation` 래핑). */
+internal interface EngineSession {
+    /** [parts]를 전송하고 응답을 스트리밍한다. */
+    fun send(parts: List<MultimodalContent>): Flow<GenerationChunk>
+
+    /** 진행 중인 생성을 취소한다. */
+    fun cancel()
+
+    /** 세션 자원을 해제한다. */
+    fun close()
+}
+
+/** 엔진 초기화 파라미터. 모델 경로는 상위에서 확정하여 전달한다. */
+internal data class EngineInit(
+    val modelPath: String,
+    val backend: LMBridge.Backend,
+    val maxTokens: Int,
+    val cacheDir: String? = null,
+    val enableSpeculativeDecoding: Boolean = true,
+)
