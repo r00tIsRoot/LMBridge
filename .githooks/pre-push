@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# pre-push hook — 'v#.#.#' 릴리스 태그를 push할 때 로컬 배포를 자동 실행한다.
+#
+# 활성화(한 번만):
+#   git config core.hooksPath .githooks
+#
+# 동작:
+#   git push origin v0.2.0  (또는 git push --tags) 실행 시,
+#   push 대상 ref 중 refs/tags/vX.Y.Z 가 있으면 scripts/publish-local.sh 를 돌려
+#   r00tIsRoot/packages(gh-pages)로 배포한다. 배포 실패 시 태그 push 자체를 중단한다.
+#
+# 참고: push 직전에 현재 작업트리를 빌드한다(태그 커밋 == HEAD 라는 일반 흐름 가정).
+#       배포만 검증하려면 DRY_RUN=1 git push origin vX.Y.Z 로 push는 진행하되 배포는 dry-run.
+set -euo pipefail
+
+remote="${1:-}"
+url="${2:-}"
+
+tag_re='^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$'
+zero='0000000000000000000000000000000000000000'
+repo_root="$(git rev-parse --show-toplevel)"
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  [[ "${local_ref}" =~ ${tag_re} ]] || continue
+  # 태그 삭제 push(로컬 oid가 0)는 무시
+  [[ "${local_oid}" == "${zero}" ]] && continue
+
+  tag="${BASH_REMATCH[1]}"
+  version="${tag#v}"
+  echo "[pre-push] 릴리스 태그 감지: ${tag} → 로컬 배포 실행"
+
+  tag_commit="$(git rev-parse "${local_oid}^{commit}")"
+  head_commit="$(git rev-parse HEAD)"
+  if [[ "${tag_commit}" != "${head_commit}" ]]; then
+    echo "[pre-push] 경고: 태그 커밋(${tag_commit:0:8})과 HEAD(${head_commit:0:8})가 다릅니다." >&2
+    echo "[pre-push]        현재 작업트리 기준으로 빌드/배포합니다." >&2
+  fi
+
+  # publish 스크립트가 hook의 stdin을 소비하지 않도록 </dev/null
+  if ! EXPECT_VERSION="${version}" "${repo_root}/scripts/publish-local.sh" </dev/null; then
+    echo "[pre-push] 배포 실패 → 태그 push를 중단합니다." >&2
+    exit 1
+  fi
+  echo "[pre-push] 배포 완료 → 태그 ${tag} push를 계속합니다."
+done
+
+exit 0

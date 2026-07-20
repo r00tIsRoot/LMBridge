@@ -1,9 +1,9 @@
 name: Publish to GitHub Pages
 
+# 태그 push 자동 배포는 로컬 pre-push hook(.githooks/pre-push)으로 대체됨.
+# 필요 시 Actions 탭에서 수동 실행(workflow_dispatch)만 가능하도록 자동 트리거를 껐다.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
