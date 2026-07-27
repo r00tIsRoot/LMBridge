@@ -43,5 +43,8 @@ internal data class EngineInit(
     val backend: LMBridge.Backend,
     val maxTokens: Int,
     val cacheDir: String? = null,
-    val enableSpeculativeDecoding: Boolean = true,
+    // MTP(speculative decoding)는 임베더 lookup 테이블을 포함한 전용 모델에서만 동작한다.
+    // litert-community의 일반 .litertlm(Gemma3-1B / Qwen2.5 / DeepSeek 등)은 이를 포함하지
+    // 않아, 켜면 초기화가 `embedding_lookup == nullptr`(RET_CHECK)로 실패한다. → 기본 off.
+    val enableSpeculativeDecoding: Boolean = false,
 )

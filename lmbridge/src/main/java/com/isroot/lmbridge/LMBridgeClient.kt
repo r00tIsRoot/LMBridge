@@ -36,6 +36,7 @@ class LMBridgeClient private constructor(
     private val modelInfo: ModelDownloadManager.ModelInfo?,
     private val backend: LMBridge.Backend,
     private val maxNumTokens: Int,
+    private val enableSpeculativeDecoding: Boolean,
 ) {
     private enum class State { IDLE, READY, RELEASED }
 
@@ -72,6 +73,7 @@ class LMBridgeClient private constructor(
                 backend = backend,
                 maxTokens = maxNumTokens,
                 cacheDir = context.cacheDir.absolutePath,
+                enableSpeculativeDecoding = enableSpeculativeDecoding,
             ),
         )
         state = State.READY
@@ -198,6 +200,7 @@ class LMBridgeClient private constructor(
         private var modelInfo: ModelDownloadManager.ModelInfo? = null
         private var backend: LMBridge.Backend = LMBridge.Backend.CPU
         private var maxNumTokens: Int = 1024
+        private var enableSpeculativeDecoding: Boolean = false
 
         /** 로컬 모델 파일 경로를 직접 지정. */
         fun setModelPath(path: String): Builder = apply { modelPath = path }
@@ -209,8 +212,17 @@ class LMBridgeClient private constructor(
 
         fun setMaxNumTokens(maxNumTokens: Int): Builder = apply { this.maxNumTokens = maxNumTokens }
 
+        /**
+         * MTP(speculative decoding) 사용 여부. 기본값 false.
+         *
+         * 임베더 lookup 테이블을 포함한 전용 모델에서만 켜야 한다. 일반 litert-community
+         * `.litertlm`에서 켜면 초기화가 `embedding_lookup == nullptr`로 실패한다.
+         */
+        fun setEnableSpeculativeDecoding(enabled: Boolean): Builder =
+            apply { this.enableSpeculativeDecoding = enabled }
+
         fun build(): LMBridgeClient =
-            LMBridgeClient(context, modelPath, modelInfo, backend, maxNumTokens)
+            LMBridgeClient(context, modelPath, modelInfo, backend, maxNumTokens, enableSpeculativeDecoding)
     }
 
     companion object {
