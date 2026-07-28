@@ -54,6 +54,8 @@ class ModelDownloadManager(
      * @property commitHash 특정 버전 커밋 해시
      * @property sizeInBytes 전체 크기(진행률/검증용, 0이면 헤더에서 추정)
      * @property sha256 무결성 검증용 SHA-256(소문자 hex). null이면 크기 검증으로 폴백.
+     * @property displayName 화면에 노출할 이름. 미지정 시 [modelId]의 마지막 경로 조각을 쓴다.
+     * @property gated HuggingFace 게이트(제한) 모델이면 true. 다운로드에 HF Access Token이 필요하다.
      */
     data class ModelInfo(
         val modelId: String,
@@ -61,6 +63,8 @@ class ModelDownloadManager(
         val commitHash: String,
         val sizeInBytes: Long = 0L,
         val sha256: String? = null,
+        val displayName: String = modelId.substringAfterLast('/'),
+        val gated: Boolean = false,
     ) {
         fun toDownloadUrl(): String =
             "https://huggingface.co/$modelId/resolve/$commitHash/$modelFile?download=true"
