@@ -1,5 +1,6 @@
 package com.isroot.lmbridge
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import com.isroot.lmbridge.download.ModelDownloadManager
@@ -13,6 +14,7 @@ import com.isroot.lmbridge.inference.asLegacyResults
 import com.isroot.lmbridge.models.Chat
 import com.isroot.lmbridge.models.ChatConfig
 import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.InputLimits
 import com.isroot.lmbridge.models.LMBridgeError
 import com.isroot.lmbridge.models.MultimodalContent
 import com.isroot.lmbridge.models.MultimodalInput
@@ -40,6 +42,7 @@ class LMBridgeClient private constructor(
     private val maxNumImages: Int?,
     private val visionBackend: LMBridge.Backend?,
     private val audioBackend: LMBridge.Backend?,
+    private val maxInputBytesOverride: Long?,
 ) {
     private enum class State { IDLE, READY, RELEASED }
 
@@ -80,9 +83,25 @@ class LMBridgeClient private constructor(
                 maxNumImages = maxNumImages,
                 visionBackend = visionBackend,
                 audioBackend = audioBackend,
+                maxInputBytes = resolveMaxInputBytes(),
             ),
         )
         state = State.READY
+    }
+
+    /**
+     * 인메모리 입력(오디오/이미지 바이트·문서) 1건당 최대 바이트를 확정한다.
+     *
+     * 명시적 오버라이드([Builder.setMaxInputBytes])가 있으면 그 값을, 없으면 초기화
+     * 시점의 기기 총 RAM으로 [InputLimits.budgetForDevice]가 산출한 값을 쓴다. 큰 미디어
+     * 바이트가 저사양 기기에서 OOM/네이티브 크래시로 이어지기 전에 [LMBridgeError.InvalidInput]
+     * 으로 막기 위함이다.
+     */
+    private fun resolveMaxInputBytes(): Long {
+        maxInputBytesOverride?.let { return it }
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memInfo = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        return InputLimits.budgetForDevice(memInfo.totalMem, am.isLowRamDevice)
     }
 
     /** 텍스트 프롬프트로 단발 생성(상태 비유지). */
@@ -210,6 +229,7 @@ class LMBridgeClient private constructor(
         private var maxNumImages: Int? = null
         private var visionBackend: LMBridge.Backend? = null
         private var audioBackend: LMBridge.Backend? = null
+        private var maxInputBytesOverride: Long? = null
 
         /** 로컬 모델 파일 경로를 직접 지정. */
         fun setModelPath(path: String): Builder = apply { modelPath = path }
@@ -260,6 +280,18 @@ class LMBridgeClient private constructor(
         fun setAudioBackend(backend: LMBridge.Backend): Builder =
             apply { this.audioBackend = backend }
 
+        /**
+         * 인메모리 입력(오디오/이미지 바이트·문서 텍스트) 1건당 최대 바이트를 직접 지정.
+         *
+         * 설정하지 않으면(기본 null) 초기화 시점의 기기 총 RAM으로 자동 산출한다
+         * (≤4GB→4MB, ≤6GB→16MB, >6GB→64MB, 저사양 기기는 한 단계 낮춤). 초과 입력은
+         * [LMBridgeError.InvalidInput]으로 표면화되어 OOM/네이티브 크래시를 예방한다.
+         * 대용량 미디어는 파일 경로 소스([MultimodalInput.Builder.imageFile]/
+         * [MultimodalInput.Builder.audioFile])를 쓰면 이 제한을 우회한다(힙 미적재).
+         */
+        fun setMaxInputBytes(bytes: Long): Builder =
+            apply { this.maxInputBytesOverride = bytes }
+
         fun build(): LMBridgeClient =
             LMBridgeClient(
                 context,
@@ -271,6 +303,7 @@ class LMBridgeClient private constructor(
                 maxNumImages,
                 visionBackend,
                 audioBackend,
+                maxInputBytesOverride,
             )
     }
 

@@ -56,4 +56,9 @@ internal data class EngineInit(
     val visionBackend: LMBridge.Backend? = null,
     // 오디오 인코더 백엔드. null이면 오디오가 비활성이다(오디오 입력 시 크래시 방지).
     val audioBackend: LMBridge.Backend? = null,
+    // 인메모리 입력(오디오/이미지 바이트·문서 텍스트) 1건당 최대 바이트. 초과 시
+    // LMBridgeError.InvalidInput으로 표면화한다. 파일 경로 소스(ImageFile/AudioFile)는
+    // 힙에 적재되지 않으므로 적용 대상이 아니다. 기본값은 무제한(상위 Facade가 기기에
+    // 맞춰 실제 값을 계산해 전달한다).
+    val maxInputBytes: Long = Long.MAX_VALUE,
 )

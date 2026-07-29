@@ -199,10 +199,25 @@ MultimodalInput.Builder()
     .build()
 ```
 
-**문서 처리.** 텍스트 문서만 지원합니다. 파일이 없거나·읽을 수 없거나·1MB를 초과하거나·바이너리
+**문서 처리.** 텍스트 문서만 지원합니다. 파일이 없거나·읽을 수 없거나·크기 예산을 초과하거나·바이너리
 (PDF·오피스·이미지 등, litertlm에 문서 `Content` 타입 없음)이면 조용히 무시하지 않고
 `GenerationChunk.Error(LMBridgeError.InvalidInput)`으로 표면화합니다. 잘못된 이미지/오디오 파일
 경로도 동일하게 `InvalidInput`으로 전달됩니다.
+
+**인메모리 입력 크기 예산(기기-적응형).** 오디오·이미지 바이트와 문서 텍스트처럼 앱 힙에 적재되는
+입력은 저사양 기기에서 OOM/네이티브 크래시를 일으킬 수 있어, 초기화 시점의 기기 총 RAM으로 1건당
+최대 바이트 예산을 자동 산출합니다(`≤4GB → 4MB`, `≤6GB → 16MB`, `>6GB → 64MB`, 저사양 기기는
+한 단계 낮춤). 예산을 넘는 입력은 `LMBridgeError.InvalidInput`으로 표면화됩니다. 파일 경로
+소스(`imageFile`/`audioFile`)는 힙에 적재되지 않으므로 이 예산의 적용을 받지 않습니다 — 대용량
+미디어는 파일 경로로 넣으세요. 예산을 직접 지정하려면 `Builder.setMaxInputBytes(bytes)`를 씁니다.
+
+```kotlin
+val client = LMBridgeClient.Builder(context)
+    .setModel(model)
+    .setAudioBackend(LMBridge.Backend.CPU)
+    .setMaxInputBytes(32L * 1024 * 1024)   // (선택) 자동 산출 대신 32MB로 고정
+    .build()
+```
 
 ### Tool (도구 호출)
 

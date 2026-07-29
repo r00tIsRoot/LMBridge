@@ -51,6 +51,10 @@ internal class LiteRtEngineAdapter(
     @Volatile
     private var engine: Engine? = null
 
+    /** 인메모리 입력 1건당 최대 바이트(초기화 시 [EngineInit]에서 확정). */
+    @Volatile
+    private var maxInputBytes: Long = Long.MAX_VALUE
+
     override val isInitialized: Boolean
         get() = engine?.isInitialized() == true
 
@@ -59,8 +63,9 @@ internal class LiteRtEngineAdapter(
             TAG,
             "Initializing engine (backend=${init.backend}, maxTokens=${init.maxTokens}, " +
                 "maxNumImages=${init.maxNumImages}, visionBackend=${init.visionBackend}, " +
-                "audioBackend=${init.audioBackend})",
+                "audioBackend=${init.audioBackend}, maxInputBytes=${init.maxInputBytes})",
         )
+        maxInputBytes = init.maxInputBytes
 
         // MTP(speculative decoding) 활성화.
         @OptIn(ExperimentalApi::class)
@@ -101,7 +106,7 @@ internal class LiteRtEngineAdapter(
             tools = config.tools.map { it.toToolProvider() },
         )
         val conversation = eng.createConversation(conversationConfig)
-        return LiteRtSession(conversation, dispatcher)
+        return LiteRtSession(conversation, dispatcher, maxInputBytes)
     }
 
     override fun close() {
@@ -123,6 +128,7 @@ internal class LiteRtEngineAdapter(
 private class LiteRtSession(
     private val conversation: Conversation,
     private val dispatcher: CoroutineDispatcher,
+    private val maxInputBytes: Long,
 ) : EngineSession {
 
     private companion object {
@@ -133,7 +139,7 @@ private class LiteRtSession(
         // 입력 변환(파일 IO/인코딩)은 실패할 수 있다. 조용히 삼키지 않고
         // GenerationChunk.Error로 표면화한 뒤 스트림을 닫는다.
         val contents = try {
-            Contents.of(parts.toLiteRtContents())
+            Contents.of(parts.toLiteRtContents(maxInputBytes))
         } catch (e: Throwable) {
             Logger.e(TAG, "Failed to convert multimodal input", e)
             trySend(GenerationChunk.Error(LMBridgeError.from(e)))
@@ -196,16 +202,41 @@ private class LiteRtSession(
 private fun Message.extractText(): String =
     contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
 
-private fun List<MultimodalContent>.toLiteRtContents(): List<Content> = map { part ->
+private fun List<MultimodalContent>.toLiteRtContents(maxInputBytes: Long): List<Content> = map { part ->
     when (part) {
         is MultimodalContent.Text -> Content.Text(part.text)
-        is MultimodalContent.Image -> Content.ImageBytes(ImageEncoder.encode(part.bitmap, part.encoding))
-        is MultimodalContent.ImageBytes -> Content.ImageBytes(part.bytes)
+        is MultimodalContent.Image -> {
+            val encoded = ImageEncoder.encode(part.bitmap, part.encoding)
+            requireWithinBudget(encoded.size.toLong(), maxInputBytes, "Image")
+            Content.ImageBytes(encoded)
+        }
+        is MultimodalContent.ImageBytes -> {
+            requireWithinBudget(part.bytes.size.toLong(), maxInputBytes, "Image")
+            Content.ImageBytes(part.bytes)
+        }
         is MultimodalContent.ImageFile -> Content.ImageFile(requireReadableFile(part.path, "Image"))
-        is MultimodalContent.AudioBytes -> Content.AudioBytes(part.bytes)
+        is MultimodalContent.AudioBytes -> {
+            requireWithinBudget(part.bytes.size.toLong(), maxInputBytes, "Audio")
+            Content.AudioBytes(part.bytes)
+        }
         is MultimodalContent.AudioFile -> Content.AudioFile(requireReadableFile(part.path, "Audio"))
         is MultimodalContent.Document ->
-            Content.Text(buildDocumentPrompt(DocumentReader.read(part.path, part.charset)))
+            Content.Text(buildDocumentPrompt(DocumentReader.read(part.path, part.charset, maxInputBytes)))
+    }
+}
+
+/**
+ * 인메모리 입력(오디오/이미지 바이트) 1건의 크기가 기기-적응형 예산을 넘으면
+ * [LMBridgeError.InvalidInput]으로 표면화한다. 파일 경로 소스는 힙에 적재되지 않으므로
+ * 이 검사를 거치지 않는다.
+ */
+private fun requireWithinBudget(size: Long, maxBytes: Long, label: String) {
+    if (size > maxBytes) {
+        throw LMBridgeError.InvalidInput(
+            "$label too large: $size bytes (max $maxBytes). " +
+                "Use a file source (imageFile/audioFile) or raise the limit via " +
+                "LMBridgeClient.Builder.setMaxInputBytes().",
+        )
     }
 }
 
