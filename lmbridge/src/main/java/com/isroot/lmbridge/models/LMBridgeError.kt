@@ -43,6 +43,9 @@ sealed class LMBridgeError(
     /** 추론 중 일반 실패. */
     class InferenceFailed(message: String, cause: Throwable? = null) : LMBridgeError(message, cause)
 
+    /** 멀티모달 입력이 유효하지 않음(파일 없음/읽기 불가/과대/바이너리 등). */
+    class InvalidInput(message: String, cause: Throwable? = null) : LMBridgeError(message, cause)
+
     /** 사용자/시스템에 의한 생성 취소. */
     class Cancelled : LMBridgeError("Generation was cancelled")
 

@@ -37,6 +37,9 @@ class LMBridgeClient private constructor(
     private val backend: LMBridge.Backend,
     private val maxNumTokens: Int,
     private val enableSpeculativeDecoding: Boolean,
+    private val maxNumImages: Int?,
+    private val visionBackend: LMBridge.Backend?,
+    private val audioBackend: LMBridge.Backend?,
 ) {
     private enum class State { IDLE, READY, RELEASED }
 
@@ -74,6 +77,9 @@ class LMBridgeClient private constructor(
                 maxTokens = maxNumTokens,
                 cacheDir = context.cacheDir.absolutePath,
                 enableSpeculativeDecoding = enableSpeculativeDecoding,
+                maxNumImages = maxNumImages,
+                visionBackend = visionBackend,
+                audioBackend = audioBackend,
             ),
         )
         state = State.READY
@@ -165,11 +171,11 @@ class LMBridgeClient private constructor(
     fun generateWithImages(prompt: String, images: List<Bitmap>): Flow<GenerationResult> =
         generate(MultimodalInput.textAndImages(prompt, images)).asLegacyResults()
 
-    @Deprecated("Use generate(MultimodalInput.Builder().audio(...).text(...).build()) instead.")
+    @Deprecated("Use generate(MultimodalInput.Builder().audioBytes(...).text(...).build()) instead.")
     @Suppress("DEPRECATION")
     fun generateWithAudio(prompt: String, audioBytes: ByteArray): Flow<GenerationResult> =
         generate(
-            MultimodalInput.Builder().audio(audioBytes).text(prompt).build(),
+            MultimodalInput.Builder().audioBytes(audioBytes).text(prompt).build(),
         ).asLegacyResults()
 
     @Deprecated("Use generate(MultimodalInput.Builder().document(...).text(...).build()) instead.")
@@ -201,6 +207,9 @@ class LMBridgeClient private constructor(
         private var backend: LMBridge.Backend = LMBridge.Backend.CPU
         private var maxNumTokens: Int = 1024
         private var enableSpeculativeDecoding: Boolean = false
+        private var maxNumImages: Int? = null
+        private var visionBackend: LMBridge.Backend? = null
+        private var audioBackend: LMBridge.Backend? = null
 
         /** 로컬 모델 파일 경로를 직접 지정. */
         fun setModelPath(path: String): Builder = apply { modelPath = path }
@@ -221,8 +230,48 @@ class LMBridgeClient private constructor(
         fun setEnableSpeculativeDecoding(enabled: Boolean): Builder =
             apply { this.enableSpeculativeDecoding = enabled }
 
+        /**
+         * 비전(이미지) 입력 활성화 — 엔진이 미리 확보할 이미지 슬롯 수.
+         *
+         * **멀티모달(비전) 모델에 이미지를 넣으려면 반드시 1 이상으로 설정해야 한다.**
+         * 설정하지 않으면(기본 null) 엔진이 `max_num_images: 0`으로 초기화되어, 이미지를
+         * 주입하는 순간 네이티브에서 크래시한다. 텍스트 전용 모델에서는 설정하지 않는다
+         * (불필요한 비전 인코더 할당을 피함).
+         */
+        fun setMaxNumImages(maxNumImages: Int): Builder =
+            apply { this.maxNumImages = maxNumImages }
+
+        /**
+         * 비전 인코더 백엔드를 메인 백엔드와 다르게 지정(선택).
+         *
+         * 기본(null)은 [setMaxNumImages]>0일 때 메인 [setBackend]를 따른다. 일부 GPU는
+         * 이미지 샘플러(OpenCL image sampler)를 지원하지 않아 GPU 비전이 실패할 수 있는데,
+         * 이때 비전만 [LMBridge.Backend.CPU]로 분리해 안정적으로 돌릴 수 있다.
+         */
+        fun setVisionBackend(backend: LMBridge.Backend): Builder =
+            apply { this.visionBackend = backend }
+
+        /**
+         * 오디오 입력 활성화 — 오디오 인코더 백엔드 지정.
+         *
+         * 설정하지 않으면(기본 null) 오디오가 비활성이다. 오디오를 주입하려면
+         * (예: [MultimodalInput.Builder.audioBytes]) 이 값을 지정해야 한다.
+         */
+        fun setAudioBackend(backend: LMBridge.Backend): Builder =
+            apply { this.audioBackend = backend }
+
         fun build(): LMBridgeClient =
-            LMBridgeClient(context, modelPath, modelInfo, backend, maxNumTokens, enableSpeculativeDecoding)
+            LMBridgeClient(
+                context,
+                modelPath,
+                modelInfo,
+                backend,
+                maxNumTokens,
+                enableSpeculativeDecoding,
+                maxNumImages,
+                visionBackend,
+                audioBackend,
+            )
     }
 
     companion object {

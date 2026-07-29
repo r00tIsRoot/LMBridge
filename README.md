@@ -167,6 +167,10 @@ sealed interface GenerationChunk {
 
 ### MultimodalInput
 
+미디어는 **바이트**·**파일 경로**로 넣을 수 있고, 이미지는 추가로 **비트맵**을 받습니다. 파일 경로
+소스(`imageFile`/`audioFile`)는 파일을 앱 힙에 적재하지 않고 엔진에 경로로 직접 전달하므로
+대용량 미디어에 유리합니다.
+
 ```kotlin
 // 편의 팩토리
 MultimodalInput.text("안녕하세요")
@@ -174,12 +178,31 @@ MultimodalInput.textAndImages("이 이미지를 설명해줘", listOf(bitmap1, b
 
 // 빌더(순서대로 혼합)
 MultimodalInput.Builder()
-    .image(cameraBitmap)
-    .audio(audioBytes)
-    .document("/path/to/doc.pdf")
+    .image(cameraBitmap)                       // 비트맵 → 무손실 PNG(기본)
+    .imageBytes(jpegBytes)                      // 이미 인코딩된 이미지 바이트(재인코딩 없음)
+    .imageFile("/sdcard/photo.jpg")            // 이미지 파일 경로(힙 적재 없음)
+    .audioBytes(recordedPcmBytes)              // 이미 인코딩된 오디오 바이트
+    .audioFile("/sdcard/clip.wav")             // 오디오 파일 경로(힙 적재 없음)
+    .document("/path/to/notes.txt")            // 텍스트 문서(UTF-8 기본, charset 지정 가능)
     .text("이 자료들을 종합해서 설명해줘")
     .build()
 ```
+
+**이미지 인코딩(옵트인).** 기본은 무손실 PNG라 카메라 사진이 수십 MB가 될 수 있습니다.
+경량화가 필요하면 `ImageEncoding`으로 다운스케일·JPEG를 명시하세요.
+
+```kotlin
+MultimodalInput.Builder()
+    .image(cameraBitmap, ImageEncoding.COMPACT_JPEG)          // 긴 변 1024px + JPEG q90
+    .image(cameraBitmap, ImageEncoding(maxDimension = 768, format = ImageEncoding.Format.JPEG, quality = 85))
+    .text("설명해줘")
+    .build()
+```
+
+**문서 처리.** 텍스트 문서만 지원합니다. 파일이 없거나·읽을 수 없거나·1MB를 초과하거나·바이너리
+(PDF·오피스·이미지 등, litertlm에 문서 `Content` 타입 없음)이면 조용히 무시하지 않고
+`GenerationChunk.Error(LMBridgeError.InvalidInput)`으로 표면화합니다. 잘못된 이미지/오디오 파일
+경로도 동일하게 `InvalidInput`으로 전달됩니다.
 
 ### Tool (도구 호출)
 

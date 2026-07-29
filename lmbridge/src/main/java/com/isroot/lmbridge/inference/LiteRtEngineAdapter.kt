@@ -1,6 +1,5 @@
 package com.isroot.lmbridge.inference
 
-import android.graphics.Bitmap
 import com.google.ai.edge.litertlm.Backend as LiteRtBackend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -18,7 +17,9 @@ import com.google.ai.edge.litertlm.tool
 import com.isroot.lmbridge.LMBridge
 import com.isroot.lmbridge.Logger
 import com.isroot.lmbridge.models.ChatConfig
+import com.isroot.lmbridge.models.DocumentReader
 import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.ImageEncoder
 import com.isroot.lmbridge.models.LMBridgeError
 import com.isroot.lmbridge.models.MultimodalContent
 import com.isroot.lmbridge.models.Tool
@@ -31,7 +32,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -55,16 +55,34 @@ internal class LiteRtEngineAdapter(
         get() = engine?.isInitialized() == true
 
     override suspend fun initialize(init: EngineInit) = withContext(dispatcher) {
-        Logger.d(TAG, "Initializing engine (backend=${init.backend}, maxTokens=${init.maxTokens})")
+        Logger.d(
+            TAG,
+            "Initializing engine (backend=${init.backend}, maxTokens=${init.maxTokens}, " +
+                "maxNumImages=${init.maxNumImages}, visionBackend=${init.visionBackend}, " +
+                "audioBackend=${init.audioBackend})",
+        )
 
         // MTP(speculative decoding) 활성화.
         @OptIn(ExperimentalApi::class)
         ExperimentalFlags.enableSpeculativeDecoding = init.enableSpeculativeDecoding
 
+        // 비전 활성 시(maxNumImages>0) 비전 백엔드가 지정되지 않았으면 메인 백엔드를 따른다.
+        // 지정되지 않고 비전도 비활성이면 null로 두어 native 기본(비전 미할당)을 유지한다.
+        val visionEnabled = (init.maxNumImages ?: 0) > 0
+        val visionBackend = when {
+            init.visionBackend != null -> toLiteRtBackend(init.visionBackend)
+            visionEnabled -> toLiteRtBackend(init.backend)
+            else -> null
+        }
+
         val config = EngineConfig(
             modelPath = init.modelPath,
             backend = toLiteRtBackend(init.backend),
+            visionBackend = visionBackend,
+            audioBackend = init.audioBackend?.let { toLiteRtBackend(it) },
             maxNumTokens = init.maxTokens,
+            maxNumImages = init.maxNumImages,
+            cacheDir = init.cacheDir,
         )
         try {
             engine = Engine(config).apply { initialize() }
@@ -112,33 +130,44 @@ private class LiteRtSession(
     }
 
     override fun send(parts: List<MultimodalContent>): Flow<GenerationChunk> = callbackFlow {
-        val contents = Contents.of(parts.toLiteRtContents())
+        // 입력 변환(파일 IO/인코딩)은 실패할 수 있다. 조용히 삼키지 않고
+        // GenerationChunk.Error로 표면화한 뒤 스트림을 닫는다.
+        val contents = try {
+            Contents.of(parts.toLiteRtContents())
+        } catch (e: Throwable) {
+            Logger.e(TAG, "Failed to convert multimodal input", e)
+            trySend(GenerationChunk.Error(LMBridgeError.from(e)))
+            close()
+            null
+        }
 
-        conversation.sendMessageAsync(
-            contents,
-            object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    // 정식 텍스트 추출 (message.toString() 사용 금지 — 디버그 문자열 오염 방지)
-                    val text = message.extractText()
-                    if (text.isNotEmpty()) trySend(GenerationChunk.Token(text))
-                    // 도구 호출을 구조화하여 노출
-                    message.toolCalls.forEach { call ->
-                        trySend(GenerationChunk.ToolCall(call.name, call.arguments.toJsonString()))
+        if (contents != null) {
+            conversation.sendMessageAsync(
+                contents,
+                object : MessageCallback {
+                    override fun onMessage(message: Message) {
+                        // 정식 텍스트 추출 (message.toString() 사용 금지 — 디버그 문자열 오염 방지)
+                        val text = message.extractText()
+                        if (text.isNotEmpty()) trySend(GenerationChunk.Token(text))
+                        // 도구 호출을 구조화하여 노출
+                        message.toolCalls.forEach { call ->
+                            trySend(GenerationChunk.ToolCall(call.name, call.arguments.toJsonString()))
+                        }
                     }
-                }
 
-                override fun onDone() {
-                    trySend(GenerationChunk.Done)
-                    close()
-                }
+                    override fun onDone() {
+                        trySend(GenerationChunk.Done)
+                        close()
+                    }
 
-                override fun onError(throwable: Throwable) {
-                    Logger.e(TAG, "Generation error", throwable)
-                    trySend(GenerationChunk.Error(LMBridgeError.from(throwable)))
-                    close()
-                }
-            },
-        )
+                    override fun onError(throwable: Throwable) {
+                        Logger.e(TAG, "Generation error", throwable)
+                        trySend(GenerationChunk.Error(LMBridgeError.from(throwable)))
+                        close()
+                    }
+                },
+            )
+        }
         awaitClose { runCatchingCancel() }
     }.flowOn(dispatcher)
 
@@ -167,38 +196,29 @@ private class LiteRtSession(
 private fun Message.extractText(): String =
     contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
 
-private fun List<MultimodalContent>.toLiteRtContents(): List<Content> = flatMap { part ->
+private fun List<MultimodalContent>.toLiteRtContents(): List<Content> = map { part ->
     when (part) {
-        is MultimodalContent.Text -> listOf(Content.Text(part.text))
-        is MultimodalContent.Image -> listOf(Content.ImageBytes(part.bitmap.toPngBytes()))
-        is MultimodalContent.Audio -> listOf(Content.AudioBytes(part.bytes))
-        is MultimodalContent.Document -> {
-            val body = readDocument(part.path)
-            if (body != null) {
-                listOf(
-                    Content.Text(
-                        "Based on the following document, answer the user's request.\n\n" +
-                            "Document content:\n$body",
-                    ),
-                )
-            } else {
-                emptyList()
-            }
-        }
+        is MultimodalContent.Text -> Content.Text(part.text)
+        is MultimodalContent.Image -> Content.ImageBytes(ImageEncoder.encode(part.bitmap, part.encoding))
+        is MultimodalContent.ImageBytes -> Content.ImageBytes(part.bytes)
+        is MultimodalContent.ImageFile -> Content.ImageFile(requireReadableFile(part.path, "Image"))
+        is MultimodalContent.AudioBytes -> Content.AudioBytes(part.bytes)
+        is MultimodalContent.AudioFile -> Content.AudioFile(requireReadableFile(part.path, "Audio"))
+        is MultimodalContent.Document ->
+            Content.Text(buildDocumentPrompt(DocumentReader.read(part.path, part.charset)))
     }
 }
 
-private fun readDocument(path: String): String? = try {
-    val file = File(path)
-    if (file.exists()) file.readText() else null
-} catch (e: Exception) {
-    null
-}
+private fun buildDocumentPrompt(body: String): String =
+    "Based on the following document, answer the user's request.\n\nDocument content:\n$body"
 
-private fun Bitmap.toPngBytes(): ByteArray {
-    val stream = ByteArrayOutputStream()
-    compress(Bitmap.CompressFormat.PNG, 100, stream)
-    return stream.toByteArray()
+/** 파일 소스(이미지/오디오)의 존재·가독성을 검증하고 절대경로를 돌려준다. */
+private fun requireReadableFile(path: String, label: String): String {
+    val file = File(path)
+    if (!file.exists() || !file.isFile || !file.canRead()) {
+        throw LMBridgeError.InvalidInput("$label file not found or unreadable: $path")
+    }
+    return file.absolutePath
 }
 
 private fun Map<String, Any?>.toJsonString(): String {

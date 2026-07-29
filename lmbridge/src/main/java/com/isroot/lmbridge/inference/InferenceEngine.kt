@@ -47,4 +47,13 @@ internal data class EngineInit(
     // litert-community의 일반 .litertlm(Gemma3-1B / Qwen2.5 / DeepSeek 등)은 이를 포함하지
     // 않아, 켜면 초기화가 `embedding_lookup == nullptr`(RET_CHECK)로 실패한다. → 기본 off.
     val enableSpeculativeDecoding: Boolean = false,
+    // 비전(이미지) 입력을 받으려면 엔진이 이미지 슬롯을 미리 할당해야 한다. null/0이면
+    // 비전이 비활성(native `max_num_images: 0`)이라, 멀티모달 모델이라도 이미지를 주입하면
+    // 네이티브가 크래시한다. 텍스트 전용 모델의 기본 동작을 보존하기 위해 기본값은 null(비활성).
+    val maxNumImages: Int? = null,
+    // 비전 인코더 백엔드. null이면 [maxNumImages]>0일 때 [backend]를 사용한다.
+    // 이미지 샘플러(OpenCL image sampler)가 없는 GPU에서는 CPU 비전으로 분리 지정할 수 있다.
+    val visionBackend: LMBridge.Backend? = null,
+    // 오디오 인코더 백엔드. null이면 오디오가 비활성이다(오디오 입력 시 크래시 방지).
+    val audioBackend: LMBridge.Backend? = null,
 )
