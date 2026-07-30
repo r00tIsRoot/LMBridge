@@ -136,7 +136,7 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 | `setModel(info)` | 카탈로그/커스텀 모델 지정. `initialize()`가 로컬 존재를 확인해 로드 |
 | `setModelPath(path)` | 로컬 `.litertlm` 파일 경로를 직접 지정 |
 | `setBackend(backend)` | `CPU`(기본) · `GPU` · `NPU` |
-| `setMaxNumTokens(n)` | 최대 토큰 수 (기본 1024) |
+| `setMaxNumTokens(n)` | 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이. **지정하지 않으면 각 모델 내장 최대값(파일명 `ekvNNNN`, 예 ekv4096) 사용.** 값을 지정하면 상한을 낮춰 메모리를 줄임(큰 입력은 잘림) |
 | `setEnableSpeculativeDecoding(b)` | MTP 사용 여부(기본 false, 전용 모델 전용) |
 
 셋 다 지정하지 않으면 번들 에셋 `gemma-4-E2B-it.litertlm`을 사용합니다.
@@ -365,7 +365,8 @@ suspend fun loadModel(info: ModelDownloadManager.ModelInfo) {
     val client = LMBridgeClient.Builder(appContext)
         .setModel(info)
         .setBackend(LMBridge.Backend.CPU)
-        .setMaxNumTokens(1024)
+        // setMaxNumTokens 생략 → 모델 내장 최대 컨텍스트 사용(큰 문서/오디오 지원).
+        // 메모리를 줄이려면 .setMaxNumTokens(1024)처럼 상한을 낮춘다.
         .build()
     client.initialize()    // suspend — 미다운로드 시 ModelNotFound
     activeClient = client

@@ -41,7 +41,9 @@ internal interface EngineSession {
 internal data class EngineInit(
     val modelPath: String,
     val backend: LMBridge.Backend,
-    val maxTokens: Int,
+    // 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이. null이면 각 모델 번들에 내장된
+    // 최대값(파일명 ekvNNNN)을 사용한다. litertlm 계약: 양수 또는 null(모델/엔진 기본값 사용).
+    val maxTokens: Int? = null,
     val cacheDir: String? = null,
     // MTP(speculative decoding)는 임베더 lookup 테이블을 포함한 전용 모델에서만 동작한다.
     // litert-community의 일반 .litertlm(Gemma3-1B / Qwen2.5 / DeepSeek 등)은 이를 포함하지

@@ -37,7 +37,7 @@ class LMBridgeClient private constructor(
     private val modelPath: String?,
     private val modelInfo: ModelDownloadManager.ModelInfo?,
     private val backend: LMBridge.Backend,
-    private val maxNumTokens: Int,
+    private val maxNumTokens: Int?,
     private val enableSpeculativeDecoding: Boolean,
     private val maxNumImages: Int?,
     private val visionBackend: LMBridge.Backend?,
@@ -224,7 +224,7 @@ class LMBridgeClient private constructor(
         private var modelPath: String? = null
         private var modelInfo: ModelDownloadManager.ModelInfo? = null
         private var backend: LMBridge.Backend = LMBridge.Backend.CPU
-        private var maxNumTokens: Int = 1024
+        private var maxNumTokens: Int? = null
         private var enableSpeculativeDecoding: Boolean = false
         private var maxNumImages: Int? = null
         private var visionBackend: LMBridge.Backend? = null
@@ -239,6 +239,16 @@ class LMBridgeClient private constructor(
 
         fun setBackend(backend: LMBridge.Backend): Builder = apply { this.backend = backend }
 
+        /**
+         * 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이.
+         *
+         * **설정하지 않으면(기본 null) 각 모델 번들에 내장된 최대값(파일명 `ekvNNNN`,
+         * 예: ekv4096)을 그대로 사용한다.** 값을 지정하면 그 값으로 상한을 낮춰 KV 캐시
+         * 메모리를 줄일 수 있다(단, 큰 문서/오디오는 잘림). 양수만 유효하다.
+         *
+         * 주의: 상한을 키우면 KV 캐시가 커져 메모리 사용량이 늘어난다. 저사양 기기에서
+         * 큰 모델 + 큰 컨텍스트는 OOM될 수 있으니, 필요 시 이 값으로 낮춰 조절한다.
+         */
         fun setMaxNumTokens(maxNumTokens: Int): Builder = apply { this.maxNumTokens = maxNumTokens }
 
         /**
