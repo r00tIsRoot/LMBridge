@@ -3,7 +3,9 @@ package com.isroot.lmbridge.inference
 import com.isroot.lmbridge.LMBridge
 import com.isroot.lmbridge.models.ChatConfig
 import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.GenerationStats
 import com.isroot.lmbridge.models.MultimodalContent
+import com.isroot.lmbridge.models.ToolResponse
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -29,6 +31,12 @@ internal interface InferenceEngine {
 internal interface EngineSession {
     /** [parts]를 전송하고 응답을 스트리밍한다. */
     fun send(parts: List<MultimodalContent>): Flow<GenerationChunk>
+
+    /** 수동 도구 호출의 실행 결과를 돌려주고 이어지는 응답을 스트리밍한다. */
+    fun sendToolResponses(responses: List<ToolResponse>): Flow<GenerationChunk>
+
+    /** 대화 통계(컨텍스트 토큰 수, 벤치마크 활성 시 처리 속도). */
+    suspend fun stats(): GenerationStats
 
     /** 진행 중인 생성을 취소한다. */
     fun cancel()
@@ -63,4 +71,9 @@ internal data class EngineInit(
     // 힙에 적재되지 않으므로 적용 대상이 아니다. 기본값은 무제한(상위 Facade가 기기에
     // 맞춰 실제 값을 계산해 전달한다).
     val maxInputBytes: Long = Long.MAX_VALUE,
+    // NPU 백엔드가 벤더 런타임 라이브러리를 찾을 디렉터리. 앱 번들 라이브러리를 쓰는 경우
+    // `applicationInfo.nativeLibraryDir`를 전달한다(litertlm Android 가이드 권장).
+    val nativeLibraryDir: String? = null,
+    // true면 대화별 처리 속도(TTFT, prefill/decode tokens/s)를 수집한다.
+    val enableBenchmark: Boolean = false,
 )

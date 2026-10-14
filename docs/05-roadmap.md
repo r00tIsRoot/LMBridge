@@ -54,8 +54,11 @@
 - [ ] **G8** `Backend.AUTO` + `BackendResolver`(NPU→GPU→CPU 폴백)
 - [ ] **G13** WorkManager 백그라운드 다운로드 + `DownloadPolicy`(WiFi/Unmetered)
 - [ ] 네트워크 스택 OkHttp 전환 검토
-- [ ] `GenerationStats`(선택 백엔드, 토큰/초 등) 노출
-- [ ] 도구 호출 구조화(`GenerationChunk.ToolCall`)
+- [x] `GenerationStats`(컨텍스트 토큰, TTFT, 토큰/초) 노출 — `Chat.stats()` + `setEnableBenchmark`
+- [x] 도구 호출 구조화(`GenerationChunk.ToolCall`) + 수동 도구 호출(`sendToolResponses`)
+- [x] litertlm 0.16.1 기능 반영: `Sampler`, `history`(initialMessages), `Thinking`/`GenerationChunk.Thought`,
+  `maxOutputTokens`, NPU `nativeLibraryDir`, 네이티브 로그 레벨 연동
+- [ ] litertlm 0.17+ 업그레이드(Kotlin 2.4 메타데이터 → 소비 앱 Kotlin 2.3+ 필요) 및 `EmbeddingEngine` 래핑
 
 **Exit**: GPU 미지원 기기에서 자동으로 CPU 폴백. WiFi 전용 백그라운드 다운로드 성공.
 

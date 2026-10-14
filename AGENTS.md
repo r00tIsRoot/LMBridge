@@ -16,7 +16,7 @@ On-device LLM inference Android SDK using Google LiteRT-LM.
 - **Kotlin**: 2.2.0 / JVM 17
 - **Gradle**: 8.10.2+ (AGP 8.8.x)
 - **Android API**: 26+ (Oreo), compileSdk 36
-- **Core Engine**: `com.google.ai.edge.litertlm:litertlm-android:0.11.0`
+- **Core Engine**: `com.google.ai.edge.litertlm:litertlm-android:0.16.1`
 - **Model Format**: `.litertlm` files.
 
 ## Key Components

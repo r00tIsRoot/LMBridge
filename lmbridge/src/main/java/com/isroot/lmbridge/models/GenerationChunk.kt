@@ -10,6 +10,9 @@ sealed interface GenerationChunk {
     /** 스트리밍 토큰(부분 텍스트). */
     data class Token(val text: String) : GenerationChunk
 
+    /** 모델의 추론(thinking) 텍스트. 답변([Token])과 분리된 `thought` 채널에서 온다. */
+    data class Thought(val text: String) : GenerationChunk
+
     /**
      * 모델이 요청한 도구 호출.
      *

@@ -46,7 +46,7 @@
 | 항목 | 목표 설계(메모) | 실제 구현 | 판정 |
 |------|----------------|-----------|------|
 | 모듈 구성 | `:lmbridge` + `:demo` + `docs/` | `:lmbridge`만, 고아 `shared/` 잔재 | ⚠️ 불일치 |
-| litertlm 버전 | 0.14.0 | build 0.11.0 / README 0.10.0 | ⚠️ 불일치 |
+| litertlm 버전 | 0.16.1 | build 0.16.1 / README 0.16.1 | ✅ 일치 |
 | 공개 API 경계 | litertlm 타입 비노출 | `Conversation`/`ToolProvider` 노출 | ❌ 위배 |
 | 백엔드 | CPU/GPU/NPU + AUTO 폴백 | CPU/GPU/NPU (AUTO·폴백 없음) | ⚠️ 미완 |
 | 스트리밍 | `Flow<GenerationChunk>` | `Flow<GenerationResult>` (유사) | ✅ 유사 |

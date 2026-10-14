@@ -2,8 +2,10 @@ package com.isroot.lmbridge.inference
 
 import com.isroot.lmbridge.models.Chat
 import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.GenerationStats
 import com.isroot.lmbridge.models.MultimodalContent
 import com.isroot.lmbridge.models.MultimodalInput
+import com.isroot.lmbridge.models.ToolResponse
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -19,6 +21,11 @@ internal class EngineSessionChat(
 
     override fun send(input: MultimodalInput): Flow<GenerationChunk> =
         session.send(input.parts)
+
+    override fun sendToolResponses(responses: List<ToolResponse>): Flow<GenerationChunk> =
+        session.sendToolResponses(responses)
+
+    override suspend fun stats(): GenerationStats = session.stats()
 
     override fun stop() = session.cancel()
 

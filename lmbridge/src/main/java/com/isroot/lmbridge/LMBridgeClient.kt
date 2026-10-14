@@ -43,6 +43,7 @@ class LMBridgeClient private constructor(
     private val visionBackend: LMBridge.Backend?,
     private val audioBackend: LMBridge.Backend?,
     private val maxInputBytesOverride: Long?,
+    private val enableBenchmark: Boolean,
 ) {
     private enum class State { IDLE, READY, RELEASED }
 
@@ -84,6 +85,8 @@ class LMBridgeClient private constructor(
                 visionBackend = visionBackend,
                 audioBackend = audioBackend,
                 maxInputBytes = resolveMaxInputBytes(),
+                nativeLibraryDir = context.applicationInfo.nativeLibraryDir,
+                enableBenchmark = enableBenchmark,
             ),
         )
         state = State.READY
@@ -230,6 +233,7 @@ class LMBridgeClient private constructor(
         private var visionBackend: LMBridge.Backend? = null
         private var audioBackend: LMBridge.Backend? = null
         private var maxInputBytesOverride: Long? = null
+        private var enableBenchmark: Boolean = false
 
         /** 로컬 모델 파일 경로를 직접 지정. */
         fun setModelPath(path: String): Builder = apply { modelPath = path }
@@ -252,10 +256,12 @@ class LMBridgeClient private constructor(
         fun setMaxNumTokens(maxNumTokens: Int): Builder = apply { this.maxNumTokens = maxNumTokens }
 
         /**
-         * MTP(speculative decoding) 사용 여부. 기본값 false.
+         * MTP(Multi-Token Prediction, speculative decoding) 사용 여부. 기본값 false.
          *
-         * 임베더 lookup 테이블을 포함한 전용 모델에서만 켜야 한다. 일반 litert-community
-         * `.litertlm`에서 켜면 초기화가 `embedding_lookup == nullptr`로 실패한다.
+         * 출력 품질 저하 없이 decode 속도를 높인다(Gemma 4 기준 모바일 GPU 최대 2.2배,
+         * CPU 최대 1.5배). Google은 GPU 백엔드에서 사용을 권장한다.
+         * 단, MTP 드래프터를 포함한 모델(예: Gemma 4 E2B/E4B)에서만 켜야 한다. 일반
+         * litert-community `.litertlm`에서 켜면 초기화가 `embedding_lookup == nullptr`로 실패한다.
          */
         fun setEnableSpeculativeDecoding(enabled: Boolean): Builder =
             apply { this.enableSpeculativeDecoding = enabled }
@@ -302,6 +308,15 @@ class LMBridgeClient private constructor(
         fun setMaxInputBytes(bytes: Long): Builder =
             apply { this.maxInputBytesOverride = bytes }
 
+        /**
+         * 처리 속도 통계 수집 여부. 기본값 false.
+         *
+         * 켜면 [com.isroot.lmbridge.models.Chat.stats]가 첫 토큰 지연(TTFT)과
+         * prefill/decode tokens/s를 함께 반환한다. 성능 측정·튜닝 용도.
+         */
+        fun setEnableBenchmark(enabled: Boolean): Builder =
+            apply { this.enableBenchmark = enabled }
+
         fun build(): LMBridgeClient =
             LMBridgeClient(
                 context,
@@ -314,6 +329,7 @@ class LMBridgeClient private constructor(
                 visionBackend,
                 audioBackend,
                 maxInputBytesOverride,
+                enableBenchmark,
             )
     }
 

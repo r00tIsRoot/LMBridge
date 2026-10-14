@@ -9,20 +9,26 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
+import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.OpenApiTool
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import com.google.ai.edge.litertlm.ToolProvider
 import com.google.ai.edge.litertlm.tool
 import com.isroot.lmbridge.LMBridge
 import com.isroot.lmbridge.Logger
 import com.isroot.lmbridge.models.ChatConfig
+import com.isroot.lmbridge.models.ChatMessage
 import com.isroot.lmbridge.models.DocumentReader
 import com.isroot.lmbridge.models.GenerationChunk
+import com.isroot.lmbridge.models.GenerationStats
 import com.isroot.lmbridge.models.ImageEncoder
 import com.isroot.lmbridge.models.LMBridgeError
 import com.isroot.lmbridge.models.MultimodalContent
 import com.isroot.lmbridge.models.Tool
+import com.isroot.lmbridge.models.ToolResponse
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -48,6 +54,10 @@ internal class LiteRtEngineAdapter(
         const val TAG = "LiteRtEngineAdapter"
     }
 
+    /** 초기화 시 확정한 NPU 라이브러리 경로(백엔드 변환에 사용). */
+    @Volatile
+    private var nativeLibraryDir: String? = null
+
     @Volatile
     private var engine: Engine? = null
 
@@ -66,10 +76,14 @@ internal class LiteRtEngineAdapter(
                 "audioBackend=${init.audioBackend}, maxInputBytes=${init.maxInputBytes})",
         )
         maxInputBytes = init.maxInputBytes
+        nativeLibraryDir = init.nativeLibraryDir
+        applyNativeLogSeverity()
 
-        // MTP(speculative decoding) 활성화.
+        // MTP(speculative decoding) 및 벤치마크 수집 활성화. 엔진 생성 전에 설정해야 한다.
         @OptIn(ExperimentalApi::class)
         ExperimentalFlags.enableSpeculativeDecoding = init.enableSpeculativeDecoding
+        @OptIn(ExperimentalApi::class)
+        ExperimentalFlags.enableBenchmark = init.enableBenchmark
 
         // 비전 활성 시(maxNumImages>0) 비전 백엔드가 지정되지 않았으면 메인 백엔드를 따른다.
         // 지정되지 않고 비전도 비활성이면 null로 두어 native 기본(비전 미할당)을 유지한다.
@@ -103,7 +117,16 @@ internal class LiteRtEngineAdapter(
         val eng = engine ?: throw LMBridgeError.NotInitialized()
         val conversationConfig = ConversationConfig(
             systemInstruction = Contents.of(config.systemInstruction),
+            initialMessages = config.history.map { it.toLiteRtMessage() },
             tools = config.tools.map { it.toToolProvider() },
+            samplerConfig = config.sampler?.let {
+                SamplerConfig(topK = it.topK, topP = it.topP, temperature = it.temperature, seed = it.seed)
+            },
+            automaticToolCalling = config.automaticToolCalling,
+            maxOutputToken = config.maxOutputTokens,
+            thinkingConfig = config.thinking?.let {
+                ThinkingConfig(enableThinking = it.enabled, thinkingTokenBudget = it.tokenBudget)
+            },
         )
         val conversation = eng.createConversation(conversationConfig)
         return LiteRtSession(conversation, dispatcher, maxInputBytes)
@@ -117,7 +140,24 @@ internal class LiteRtEngineAdapter(
     private fun toLiteRtBackend(backend: LMBridge.Backend): LiteRtBackend = when (backend) {
         LMBridge.Backend.CPU -> LiteRtBackend.CPU()
         LMBridge.Backend.GPU -> LiteRtBackend.GPU()
-        LMBridge.Backend.NPU -> LiteRtBackend.NPU()
+        LMBridge.Backend.NPU -> nativeLibraryDir?.let { LiteRtBackend.NPU(nativeLibraryDir = it) }
+            ?: LiteRtBackend.NPU()
+    }
+
+    /** SDK 로그 레벨을 네이티브(litertlm C++) 로그 하한에 반영한다. */
+    private fun applyNativeLogSeverity() {
+        val severity = when (LMBridge.logLevel) {
+            LMBridge.LogLevel.OFF -> LogSeverity.INFINITY
+            LMBridge.LogLevel.ERROR -> LogSeverity.ERROR
+            LMBridge.LogLevel.WARN -> LogSeverity.WARNING
+            LMBridge.LogLevel.DEBUG -> LogSeverity.INFO
+            LMBridge.LogLevel.VERBOSE -> LogSeverity.VERBOSE
+        }
+        try {
+            Engine.setNativeMinLogSeverity(severity)
+        } catch (e: Throwable) {
+            Logger.w(TAG, "setNativeMinLogSeverity failed: ${e.message}")
+        }
     }
 }
 
@@ -133,46 +173,83 @@ private class LiteRtSession(
 
     private companion object {
         const val TAG = "LiteRtSession"
+        const val THOUGHT_CHANNEL = "thought"
     }
 
-    override fun send(parts: List<MultimodalContent>): Flow<GenerationChunk> = callbackFlow {
+    override fun send(parts: List<MultimodalContent>): Flow<GenerationChunk> =
         // 입력 변환(파일 IO/인코딩)은 실패할 수 있다. 조용히 삼키지 않고
         // GenerationChunk.Error로 표면화한 뒤 스트림을 닫는다.
-        val contents = try {
-            Contents.of(parts.toLiteRtContents(maxInputBytes))
-        } catch (e: Throwable) {
-            Logger.e(TAG, "Failed to convert multimodal input", e)
-            trySend(GenerationChunk.Error(LMBridgeError.from(e)))
-            close()
-            null
+        stream("multimodal input") { callback ->
+            conversation.sendMessageAsync(Contents.of(parts.toLiteRtContents(maxInputBytes)), callback)
         }
 
-        if (contents != null) {
-            conversation.sendMessageAsync(
-                contents,
-                object : MessageCallback {
-                    override fun onMessage(message: Message) {
-                        // 정식 텍스트 추출 (message.toString() 사용 금지 — 디버그 문자열 오염 방지)
-                        val text = message.extractText()
-                        if (text.isNotEmpty()) trySend(GenerationChunk.Token(text))
-                        // 도구 호출을 구조화하여 노출
-                        message.toolCalls.forEach { call ->
-                            trySend(GenerationChunk.ToolCall(call.name, call.arguments.toJsonString()))
-                        }
-                    }
-
-                    override fun onDone() {
-                        trySend(GenerationChunk.Done)
-                        close()
-                    }
-
-                    override fun onError(throwable: Throwable) {
-                        Logger.e(TAG, "Generation error", throwable)
-                        trySend(GenerationChunk.Error(LMBridgeError.from(throwable)))
-                        close()
-                    }
-                },
+    override fun sendToolResponses(responses: List<ToolResponse>): Flow<GenerationChunk> =
+        stream("tool responses") { callback ->
+            val message = Message.tool(
+                Contents.of(responses.map { Content.ToolResponse(it.name, it.resultJson) }),
             )
+            conversation.sendMessageAsync(message, callback)
+        }
+
+    @OptIn(ExperimentalApi::class)
+    override suspend fun stats(): GenerationStats = withContext(dispatcher) {
+        val tokens = conversation.getTokenCount()
+        // 벤치마크 비활성 시 네이티브가 예외를 던질 수 있으므로 토큰 수만 반환한다.
+        val bench = try {
+            conversation.getBenchmarkInfo()
+        } catch (e: Throwable) {
+            null
+        }
+        GenerationStats(
+            contextTokens = tokens,
+            timeToFirstTokenSeconds = bench?.timeToFirstTokenInSecond,
+            prefillTokens = bench?.lastPrefillTokenCount,
+            decodeTokens = bench?.lastDecodeTokenCount,
+            prefillTokensPerSecond = bench?.lastPrefillTokensPerSecond,
+            decodeTokensPerSecond = bench?.lastDecodeTokensPerSecond,
+        )
+    }
+
+    /**
+     * [sendWith]가 입력을 변환해 전송하면, 그 응답을 [GenerationChunk]로 스트리밍한다.
+     * 변환/전송 실패는 [GenerationChunk.Error]로 표면화한다.
+     */
+    private fun stream(
+        label: String,
+        sendWith: (MessageCallback) -> Unit,
+    ): Flow<GenerationChunk> = callbackFlow {
+        val callback = object : MessageCallback {
+            override fun onMessage(message: Message) {
+                // 추론(thinking)은 답변과 분리된 thought 채널로 온다.
+                message.channels[THOUGHT_CHANNEL]?.takeIf { it.isNotEmpty() }
+                    ?.let { trySend(GenerationChunk.Thought(it)) }
+                // 정식 텍스트 추출 (message.toString() 사용 금지 — 디버그 문자열 오염 방지)
+                val text = message.extractText()
+                if (text.isNotEmpty()) trySend(GenerationChunk.Token(text))
+                // 도구 호출을 구조화하여 노출
+                message.toolCalls.forEach { call ->
+                    trySend(GenerationChunk.ToolCall(call.name, call.arguments.toJsonString()))
+                }
+            }
+
+            override fun onDone() {
+                trySend(GenerationChunk.Done)
+                close()
+            }
+
+            override fun onError(throwable: Throwable) {
+                Logger.e(TAG, "Generation error", throwable)
+                trySend(GenerationChunk.Error(LMBridgeError.from(throwable)))
+                close()
+            }
+        }
+
+        try {
+            sendWith(callback)
+        } catch (e: Throwable) {
+            Logger.e(TAG, "Failed to send $label", e)
+            trySend(GenerationChunk.Error(LMBridgeError.from(e)))
+            close()
         }
         awaitClose { runCatchingCancel() }
     }.flowOn(dispatcher)
@@ -198,6 +275,11 @@ private class LiteRtSession(
 }
 
 // ---- litertlm 변환 헬퍼 (어댑터 경계 내부) ----
+
+private fun ChatMessage.toLiteRtMessage(): Message = when (role) {
+    ChatMessage.Role.USER -> Message.user(text)
+    ChatMessage.Role.MODEL -> Message.model(text)
+}
 
 private fun Message.extractText(): String =
     contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }

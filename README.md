@@ -137,7 +137,8 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 | `setModelPath(path)` | 로컬 `.litertlm` 파일 경로를 직접 지정 |
 | `setBackend(backend)` | `CPU`(기본) · `GPU` · `NPU` |
 | `setMaxNumTokens(n)` | 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이. **지정하지 않으면 각 모델 내장 최대값(파일명 `ekvNNNN`, 예 ekv4096) 사용.** 값을 지정하면 상한을 낮춰 메모리를 줄임(큰 입력은 잘림) |
-| `setEnableSpeculativeDecoding(b)` | MTP 사용 여부(기본 false, 전용 모델 전용) |
+| `setEnableSpeculativeDecoding(b)` | MTP 사용 여부(기본 false). 품질 저하 없이 decode 가속(GPU 권장). MTP 드래프터 포함 모델(Gemma 4 등) 전용 |
+| `setEnableBenchmark(b)` | 처리 속도 통계 수집(기본 false). `Chat.stats()`에 TTFT·tokens/s 포함 |
 
 셋 다 지정하지 않으면 번들 에셋 `gemma-4-E2B-it.litertlm`을 사용합니다.
 
@@ -154,11 +155,37 @@ chat.stop()   // 진행 중 생성 취소
 chat.close()  // 세션 해제 (off-main 권장)
 ```
 
+**ChatConfig 옵션** — 모두 선택이며, 지정하지 않으면 모델 번들의 기본값을 씁니다.
+
+```kotlin
+val chat = client.newChat(
+    ChatConfig(
+        systemInstruction = "너는 친절한 도우미야.",
+        sampler = Sampler(topK = 10, topP = 0.95, temperature = 0.8),   // 샘플링
+        history = listOf(                                               // 이전 대화 복원/퓨샷
+            ChatMessage.user("대한민국의 수도는?"),
+            ChatMessage.model("서울입니다."),
+        ),
+        thinking = Thinking(enabled = true, tokenBudget = 1024),        // -1 무제한, 0 비활성
+        maxOutputTokens = 2048,                                         // 응답 1건 출력 상한
+    ),
+)
+chat.send("왜 그런지 설명해줘").collect { chunk ->
+    when (chunk) {
+        is GenerationChunk.Thought -> showReasoning(chunk.text)  // 추론 과정(답변과 분리)
+        is GenerationChunk.Token -> print(chunk.text)            // 답변
+        else -> {}
+    }
+}
+val stats = chat.stats()  // contextTokens(항상) + TTFT·tokens/s(setEnableBenchmark(true) 시)
+```
+
 ### GenerationChunk
 
 ```kotlin
 sealed interface GenerationChunk {
     data class Token(val text: String) : GenerationChunk                          // 스트리밍 토큰
+    data class Thought(val text: String) : GenerationChunk                        // 추론(thinking) 텍스트
     data class ToolCall(val name: String, val argsJson: String) : GenerationChunk // 도구 호출
     data object Done : GenerationChunk                                            // 생성 완료
     data class Error(val error: LMBridgeError) : GenerationChunk                  // 타입화된 오류
@@ -237,6 +264,19 @@ chat.send("서울 날씨 어때?").collect { chunk ->
     }
 }
 ```
+
+**수동 도구 호출.** `automaticToolCalling = false`면 엔진이 `executor`를 실행하지 않고
+`ToolCall`만 전달합니다. 앱이 도구를 실행(권한 확인·사용자 승인 등)한 뒤 결과를 돌려줍니다.
+
+```kotlin
+val chat = client.newChat(ChatConfig(tools = listOf(weatherTool), automaticToolCalling = false))
+val calls = mutableListOf<GenerationChunk.ToolCall>()
+chat.send("서울 날씨 어때?").collect { if (it is GenerationChunk.ToolCall) calls += it }
+val results = calls.map { ToolResponse(it.name, runMyTool(it.name, it.argsJson)) }
+chat.sendToolResponses(results).collect { if (it is GenerationChunk.Token) print(it.text) }
+```
+
+도구 호출·추론에는 이를 지원하는 모델(FunctionGemma, Gemma 4 등)이 필요합니다.
 
 ## 모델 다운로드 & 카탈로그
 
@@ -407,6 +447,10 @@ val client = LMBridgeClient.Builder(context)
     .build()
 ```
 
+NPU는 앱에 번들된 벤더 런타임을 `applicationInfo.nativeLibraryDir`에서 자동으로 찾습니다.
+GPU는 prefill이 CPU보다 수 배 빠르고 메모리 사용량도 낮아(Gemma 4 E2B, S26 Ultra 기준
+prefill 3808 vs 557 tk/s, 피크 메모리 676 vs 1733MB) 지원 기기에서는 GPU를 권장합니다.
+
 GPU(OpenCL)/NPU 네이티브 라이브러리는 매니페스트에 `required="false"`로 선언되어, 미지원
 기기에서도 설치가 가능합니다. (AUTO 자동 폴백은 로드맵 M3 예정 — [docs/05-roadmap.md](docs/05-roadmap.md))
 
@@ -425,6 +469,9 @@ LMBridge.logLevel = LMBridge.LogLevel.DEBUG   // enum으로 직접 설정
 | WARN | 경고와 오류 |
 | DEBUG | 디버그·경고·오류 |
 | VERBOSE | 모든 로그(상세 실행 정보 포함) |
+
+로그 레벨은 엔진 초기화 시 litertlm 네이티브(C++) 로그 하한에도 반영됩니다
+(OFF→출력 없음, ERROR→ERROR, WARN→WARNING, DEBUG→INFO, VERBOSE→VERBOSE).
 
 ## 오류 처리
 
@@ -449,7 +496,7 @@ lifecycleScope.launch {
 - `androidx.core:core-ktx:1.15.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0`
-- `com.google.ai.edge.litertlm:litertlm-android:0.11.0`
+- `com.google.ai.edge.litertlm:litertlm-android:0.16.1`
 
 ## 문서
 
