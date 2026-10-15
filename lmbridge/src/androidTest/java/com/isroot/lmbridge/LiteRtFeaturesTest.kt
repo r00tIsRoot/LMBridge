@@ -45,7 +45,7 @@ class LiteRtFeaturesTest {
                 .setModelPath(modelPath)
                 .setBackend(backend)
                 .setMaxNumTokens(2048)
-                .setEnableBenchmark(true)
+                .setEnableBenchmark(args.getString("benchmark") != "false")
                 .build()
             val start = System.currentTimeMillis()
             client.initialize()

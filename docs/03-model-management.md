@@ -17,9 +17,19 @@
 | `QWEN2_5_1_5B_INSTRUCT` | ~1.6GB | |
 | `DEEPSEEK_R1_DISTILL_QWEN_1_5B` | ~1.8GB | |
 
+### 리비전 고정 정책 (2026-10-15 일괄 갱신)
+- 전 항목이 `commitHash`(40자)·`sizeInBytes`·`sha256`(HF LFS oid)을 갖는다(`ModelCatalogTest`가 강제).
+- litert-community는 번들을 수시로 재패키징하며 **요구 런타임이 바뀐다**. 갱신 시 HF main을
+  맹목적으로 따르지 말고, 고정 파일의 sha256이 바뀐 항목은 커밋 메시지를 확인하고 실기기로 검증한다.
+  - LFM2.5 3종: 2026-10-13 re-pack(`lfm2` 모델 타입)은 litertlm **≥ 0.15 필요**. 이전 번들은
+    0.15+에서 `missing some output TensorBuffers`로 생성 실패 → 새 리비전으로 갱신.
+  - Qwen2.5-1.5B · MiniCPM5-1B · Qwen3-1.7B · Qwen3-4B: main은 **litert-lm 0.18.0용 chat
+    template**(content parts)이라 0.16.x에서 프롬프트/히스토리가 깨짐 → **이전 리비전 유지**.
+    litertlm 0.18+로 올릴 때 함께 갱신한다.
+- 리비전이 바뀌면 저장 디렉터리(`<id>_<commit 8자>`)도 바뀌어 기존 사용자는 새로 내려받는다.
+
 ### 개선
-- `ModelInfo`에 **`sha256` 필드 추가**(무결성 검증용, 현재 없음). HuggingFace의
-  LFS `oid sha256`을 커밋 시점에 기록.
+- ~~`ModelInfo`에 `sha256` 필드 추가~~ ✅ 완료(카탈로그 전 항목 기록).
 - `ModelInfo`에 **모달리티/최소 RAM/권장 백엔드** 메타 추가(선택 UI/사전 검증용).
 - 공개 타입 이름을 `ModelRef`(또는 `ModelInfo` 유지)로 하되 **litertlm 비의존**은 이미 만족.
 
