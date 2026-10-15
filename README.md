@@ -16,7 +16,7 @@ LMBridge는 Google의 [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) �
   엔진 교체·업그레이드가 앱 코드에 새지 않습니다.
 - **스트리밍 우선** — 모든 생성은 `Flow<GenerationChunk>`로 토큰 단위 스트리밍됩니다.
 - **모델 관리 내장** — HuggingFace에서 `.litertlm` 모델을 이어받기·SHA-256 검증과 함께 내려받는
-  다운로드 API와, litert-community 텍스트 모델 **47종**을 담은 [ModelCatalog]를 제공합니다.
+  다운로드 API와, litert-community 텍스트 모델 **40종**을 담은 [ModelCatalog]를 제공합니다.
 - **상태 유지 대화** — 히스토리를 유지하는 [Chat] 세션과 시스템 프롬프트·도구 설정을 지원합니다.
 
 > ⚠️ 엔진이 로드하는 모델은 **`.litertlm` 번들 전용**입니다. MediaPipe `.task` 파일은 로드할 수 없습니다.
@@ -29,7 +29,7 @@ LMBridge는 Google의 [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) �
 
 Jetpack Compose로 작성된 샘플 앱이며 이 SDK의 실전 사용 패턴을 보여줍니다:
 
-- **모델 선택 화면** — [ModelCatalog.ALL]을 읽어 47종 모델을 카드 목록으로 렌더링(게이트 배지 포함)
+- **모델 선택 화면** — [ModelCatalog.ALL]을 읽어 40종 모델을 카드 목록으로 렌더링(게이트 배지 포함)
 - **다운로드 화면** — 진행률·무결성 검증 표시, 게이트 모델용 HF Access Token 입력
 - **다중 채팅방** — 한 모델에 여러 대화방, 방 전환 시 스트리밍 대화 유지
 - **모델 전환** — 로드된 모델을 바꿀 때 이전 클라이언트를 안전하게 release
@@ -39,7 +39,7 @@ Jetpack Compose로 작성된 샘플 앱이며 이 SDK의 실전 사용 패턴을
 ## 요구사항
 
 - Android API 26+ (Android 8.0 Oreo)
-- Kotlin 2.2.0
+- Kotlin 2.4 (litertlm 0.18이 kotlin-stdlib 2.4.0에 의존 → **소비 앱은 Kotlin 2.3 이상** 필요)
 - Gradle 8.10.2+
 
 ## 설치
@@ -282,7 +282,7 @@ chat.sendToolResponses(results).collect { if (it is GenerationChunk.Token) print
 
 ### 모델 카탈로그
 
-[ModelCatalog]는 LiteRT-LM이 로드 가능한 `.litertlm` 모델 **47종**(대부분
+[ModelCatalog]는 LiteRT-LM이 로드 가능한 `.litertlm` 모델 **40종**(대부분
 [litert-community](https://huggingface.co/litert-community) 텍스트 생성 모델)을 담고 있습니다.
 각 항목의 `commitHash`·`sizeInBytes`·`modelFile`은 재현 가능한 다운로드를 위해 특정 리비전에
 고정돼 있습니다.
@@ -496,7 +496,7 @@ lifecycleScope.launch {
 - `androidx.core:core-ktx:1.15.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`
 - `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0`
-- `com.google.ai.edge.litertlm:litertlm-android:0.16.1`
+- `com.google.ai.edge.litertlm:litertlm-android:0.18.0`
 
 ## 문서
 

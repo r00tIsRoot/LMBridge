@@ -58,7 +58,8 @@
 - [x] 도구 호출 구조화(`GenerationChunk.ToolCall`) + 수동 도구 호출(`sendToolResponses`)
 - [x] litertlm 0.16.1 기능 반영: `Sampler`, `history`(initialMessages), `Thinking`/`GenerationChunk.Thought`,
   `maxOutputTokens`, NPU `nativeLibraryDir`, 네이티브 로그 레벨 연동
-- [ ] litertlm 0.17+ 업그레이드(Kotlin 2.4 메타데이터 → 소비 앱 Kotlin 2.3+ 필요) 및 `EmbeddingEngine` 래핑
+- [x] litertlm 0.18.0 업그레이드(Kotlin 2.4.21 → 소비 앱 Kotlin 2.3+ 필요). 0.18 템플릿 비호환 Qwen 7종 카탈로그 제외
+- [ ] `EmbeddingEngine` 래핑, `ConversationConfig.chatTemplate` 노출 검토
 
 **Exit**: GPU 미지원 기기에서 자동으로 CPU 폴백. WiFi 전용 백그라운드 다운로드 성공.
 

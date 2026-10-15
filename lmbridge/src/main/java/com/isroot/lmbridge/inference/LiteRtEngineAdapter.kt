@@ -377,10 +377,10 @@ private fun Tool.toToolProvider(): ToolProvider {
     val openApiTool = object : OpenApiTool {
         override fun getToolDescriptionJsonString(): String = schema
 
-        override fun execute(argumentsJson: String): String {
+        override fun execute(paramsJsonString: String): String {
             val handler = declaration.executor ?: return "{}"
             return try {
-                handler(parseArgs(argumentsJson))
+                handler(parseArgs(paramsJsonString))
             } catch (e: Exception) {
                 JSONObject().put("error", e.message ?: "tool execution failed").toString()
             }

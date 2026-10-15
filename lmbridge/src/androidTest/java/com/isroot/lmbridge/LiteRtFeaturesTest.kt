@@ -22,7 +22,7 @@ import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * litertlm 0.16.1 신규 기능(sampler/history/thinking/maxOutputTokens/수동·자동 도구 호출/통계) 계측 테스트.
+ * litertlm 0.16.1+ 기능(sampler/history/thinking/maxOutputTokens/수동·자동 도구 호출/통계) 계측 테스트.
  *
  * 모델 경로는 계측 인자 `modelPath`로 지정한다(기본: /data/local/tmp/lmbridge/gemma-4-E2B-it.litertlm).
  * 백엔드는 인자 `backend`(CPU/GPU/NPU, 기본 GPU).

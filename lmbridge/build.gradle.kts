@@ -29,8 +29,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -39,8 +42,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // Google LiteRT-LM dependency - fixed version 0.16.1
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
+    // Google LiteRT-LM dependency - fixed version 0.18.0
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     // Android Instrumented Tests
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

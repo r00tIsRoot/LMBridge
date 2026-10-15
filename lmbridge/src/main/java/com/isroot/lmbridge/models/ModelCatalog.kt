@@ -13,6 +13,11 @@ import com.isroot.lmbridge.download.ModelDownloadManager.ModelInfo
  * litert-community는 번들을 수시로 재패키징하며, 런타임(litertlm) 요구 버전이 바뀌기도 한다.
  * litertlm을 올릴 때는 고정 리비전이 새 런타임에서 동작하는지 함께 확인해야 한다.
  *
+ * litertlm 0.18은 메시지 content를 파트 배열로 템플릿에 넘긴다. 문자열 연결(`+ message.content`)만
+ * 하는 구형 템플릿 번들은 `Failed to apply template`으로 실패하므로, HF에 0.18 대응 리비전이 없는
+ * Qwen2-0.5B/1.5B-Instruct, Qwen2.5-Coder-3B-Instruct, Qwen3-0.6B/8B/14B, Qwen3-4B-Instruct-2507은
+ * 카탈로그에서 제외했다(2026-10-15). 업스트림이 재패키징하면 다시 추가한다.
+ *
  * 소비자는 [ALL] 로 전체 목록을 순회하거나, 자주 쓰는 모델은 아래 명명 상수로 바로 참조할 수 있다.
  */
 object ModelCatalog {
@@ -70,14 +75,13 @@ object ModelCatalog {
     )
 
     val QWEN2_5_1_5B_INSTRUCT = ModelInfo(
-        // main(2026-10)은 litert-lm 0.18.0용 chat template(content parts)로 갱신돼 0.16.x에서
-        // 히스토리/프롬프트가 깨진다. litertlm을 0.18+로 올리기 전까지 이전 리비전에 고정.
+        // litert-lm 0.18.0용 chat template(content parts) 리비전. 이전 리비전은 0.18에서 템플릿 오류.
         displayName = "Qwen2.5-1.5B-Instruct",
         modelId = "litert-community/Qwen2.5-1.5B-Instruct",
         modelFile = "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
-        commitHash = "19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
-        sizeInBytes = 1597931520,
-        sha256 = "faa60663b333290c1496c499828b21d3e3254a788cacd8cce917ce0f761a2dc9",
+        commitHash = "5e6e7a58d03777898b31330a15d2e0a5a9107de3",
+        sizeInBytes = 1597922856,
+        sha256 = "c4a9b7289365ab80fe599b844b77ad253eb3c53fb0e5d963d699146a6f01255e",
         gated = false,
     )
 
@@ -177,24 +181,6 @@ object ModelCatalog {
             gated = false,
         ),
         ModelInfo(
-            displayName = "Qwen3-0.6B",
-            modelId = "litert-community/Qwen3-0.6B",
-            modelFile = "qwen3_0_6b_mixed_int4.litertlm",
-            commitHash = "e6687177e00897731e7716267eebd4eba0dde7c2",
-            sizeInBytes = 497516544L,
-            sha256 = "7900eb4e7362d88c58782c6f9999bb7a129e03544aa98b8f338ea0cc5d8c22c1",
-            gated = false,
-        ),
-        ModelInfo(
-            displayName = "Qwen2-0.5B-Instruct",
-            modelId = "litert-community/Qwen2-0.5B-Instruct",
-            modelFile = "Qwen2_0.5B_Instruct.litertlm",
-            commitHash = "13aab3e522828d85fa178d885716ab858a715149",
-            sizeInBytes = 647377840L,
-            sha256 = "0f01cc004b8eb62b92ba6be85ed05a248ba0d2f78af94c4949b313eccfb4c157",
-            gated = false,
-        ),
-        ModelInfo(
             displayName = "LFM2.5-1.2B-Instruct",
             modelId = "litert-community/LFM2.5-1.2B-Instruct",
             modelFile = "LFM2.5-1.2B-Instruct_int4.litertlm",
@@ -228,14 +214,13 @@ object ModelCatalog {
             gated = false,
         ),
         ModelInfo(
-            // main(2026-10)은 litert-lm 0.18.0용 chat template(content parts)로 갱신돼 0.16.x에서
-            // 히스토리/프롬프트가 깨진다. litertlm을 0.18+로 올리기 전까지 이전 리비전에 고정.
+            // litert-lm 0.18.0용 chat template(content parts) 리비전. 이전 리비전은 0.18에서 템플릿 오류.
             displayName = "MiniCPM5-1B",
             modelId = "litert-community/MiniCPM5-1B",
             modelFile = "minicpm_wi4b32_wi8_afp32.litertlm",
-            commitHash = "d5c36807a1b643b7cd27919f6dc16f09320db050",
-            sizeInBytes = 792625152L,
-            sha256 = "43f41a837c58408192d703a7cf7bb27a3f8b4f8cc1d34c7f79e54f058f966ccc",
+            commitHash = "d417eaa3431fe5f63ac8f70400f6bed1b7957443",
+            sizeInBytes = 792619648L,
+            sha256 = "ee1b70697ef583c46d26df5772055946d4ca2a9a80b059149bb51f4ab9646863",
             gated = false,
         ),
         ModelInfo(
@@ -284,15 +269,6 @@ object ModelCatalog {
             gated = false,
         ),
         ModelInfo(
-            displayName = "Qwen2-1.5B-Instruct",
-            modelId = "litert-community/Qwen2-1.5B-Instruct",
-            modelFile = "Qwen2_1.5B_Instruct.litertlm",
-            commitHash = "0292a162494daa04ab6d67da70a39ef353a281f2",
-            sizeInBytes = 1802843056L,
-            sha256 = "f0009d992f962157ee7164e7bf93d16229992fbb4ffe4ee055d0da47f189ad62",
-            gated = false,
-        ),
-        ModelInfo(
             displayName = "SmolLM3-3B",
             modelId = "litert-community/SmolLM3-3B",
             modelFile = "SmolLM3-3B_q4_block32_ekv4096.litertlm",
@@ -302,14 +278,13 @@ object ModelCatalog {
             gated = false,
         ),
         ModelInfo(
-            // main(2026-10)은 litert-lm 0.18.0용 chat template(content parts)로 갱신돼 0.16.x에서
-            // 히스토리/프롬프트가 깨진다. litertlm을 0.18+로 올리기 전까지 이전 리비전에 고정.
+            // litert-lm 0.18.0용 chat template(content parts) 리비전. 이전 리비전은 0.18에서 템플릿 오류.
             displayName = "Qwen3-1.7B",
             modelId = "litert-community/Qwen3-1.7B",
             modelFile = "Qwen3_1.7B.litertlm",
-            commitHash = "5d8fd1f27c771dbbbb185c9f05c3547760dd3cbd",
+            commitHash = "79bf0667b32ae025b972e5fe555fe72ca6e8816c",
             sizeInBytes = 2056729520L,
-            sha256 = "66064a4e9269cb693e124c4e3040bcb8a446b10bca42663896329495add3861c",
+            sha256 = "362ec1c906a49bbe1e68b118fdb789b70a713063b00ac914043cbda03bcf3d9a",
             gated = false,
         ),
         ModelInfo(
@@ -403,23 +378,13 @@ object ModelCatalog {
             gated = true,
         ),
         ModelInfo(
-            // main(2026-10)은 litert-lm 0.18.0용 chat template(content parts)로 갱신돼 0.16.x에서
-            // 히스토리/프롬프트가 깨진다. litertlm을 0.18+로 올리기 전까지 이전 리비전에 고정.
+            // litert-lm 0.18.0용 chat template(content parts) 리비전. 이전 리비전은 0.18에서 템플릿 오류.
             displayName = "Qwen3-4B",
             modelId = "litert-community/Qwen3-4B",
             modelFile = "qwen3_4b_mixed_int4.litertlm",
-            commitHash = "84cc5a35c9c65cd18fcd65bb1f3a7d77a4acfe6e",
-            sizeInBytes = 2659057664L,
-            sha256 = "f0794bc77efeaaf4f7af815f04c483b19b8f2ae4a102cef1b7b760a25848a18e",
-            gated = false,
-        ),
-        ModelInfo(
-            displayName = "Qwen3-4B-Instruct-2507",
-            modelId = "litert-community/Qwen3-4B-Instruct-2507",
-            modelFile = "qwen3_4b_instruct_2507_mixed_int4.litertlm",
-            commitHash = "4d409771b414d86b270ca54d27ffc45032a81142",
-            sizeInBytes = 2659057664L,
-            sha256 = "9e48b165836256f5344d9d044930607b9c47f6ef34e27f82e96881664f3ba2fd",
+            commitHash = "8b4c3d3f6e727cdb445f42feff14b808db8da4fa",
+            sizeInBytes = 2659053760L,
+            sha256 = "569fe029f51e55b6377f98ebd7f6d26431bc73e1d632034f5389f2fd720da701",
             gated = false,
         ),
         ModelInfo(
@@ -429,15 +394,6 @@ object ModelCatalog {
             commitHash = "62a183af7b3d3d46f8df17dde9bf8381988bbf68",
             sizeInBytes = 2784187376L,
             sha256 = "d507262ca3d01d93d59c573a82e6f2eeb3aec21d9a67c31fb4c0f93d17225b8f",
-            gated = false,
-        ),
-        ModelInfo(
-            displayName = "Qwen2.5-Coder-3B-Instruct",
-            modelId = "litert-community/Qwen2.5-Coder-3B-Instruct",
-            modelFile = "Qwen2.5_Coder_3B_It.litertlm",
-            commitHash = "f02778f1b0bb06315051c1e212abd19a389bff34",
-            sizeInBytes = 3433083824L,
-            sha256 = "78d23da074383f52f852b945b8090870e6c9dded02a842f535ee3ccb9e2874f3",
             gated = false,
         ),
         ModelInfo(
@@ -456,24 +412,6 @@ object ModelCatalog {
             commitHash = "90dc72b44ebe0be5ba14c8b31de8b21ce3bcb11a",
             sizeInBytes = 4533682160L,
             sha256 = "050787a59d80acf064ed71209e45a28a7ae734a06f409f271751f254643216e1",
-            gated = false,
-        ),
-        ModelInfo(
-            displayName = "Qwen3-8B",
-            modelId = "litert-community/Qwen3-8B",
-            modelFile = "qwen3_8b_mixed_int4.litertlm",
-            commitHash = "71ff705588319d52d374977eff3da4eee0c0d26e",
-            sizeInBytes = 4887412736L,
-            sha256 = "cb4e6d0de4bbf6656d177812cf0c6a983967dedd17e7f88e84b901c3a9862a42",
-            gated = false,
-        ),
-        ModelInfo(
-            displayName = "Qwen3-14B",
-            modelId = "litert-community/Qwen3-14B",
-            modelFile = "qwen3_14b_mixed_int4.litertlm",
-            commitHash = "e4122fd370cec85c61467274b180e0954e4f422d",
-            sizeInBytes = 8655863808L,
-            sha256 = "71de7d58f1b46a3fcba2f7bb700ebcc3c3715877d9a7028d93dd1bcd89bbe946",
             gated = false,
         ),
     ).sortedBy { it.displayName.lowercase() }

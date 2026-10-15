@@ -23,9 +23,15 @@
   맹목적으로 따르지 말고, 고정 파일의 sha256이 바뀐 항목은 커밋 메시지를 확인하고 실기기로 검증한다.
   - LFM2.5 3종: 2026-10-13 re-pack(`lfm2` 모델 타입)은 litertlm **≥ 0.15 필요**. 이전 번들은
     0.15+에서 `missing some output TensorBuffers`로 생성 실패 → 새 리비전으로 갱신.
-  - Qwen2.5-1.5B · MiniCPM5-1B · Qwen3-1.7B · Qwen3-4B: main은 **litert-lm 0.18.0용 chat
-    template**(content parts)이라 0.16.x에서 프롬프트/히스토리가 깨짐 → **이전 리비전 유지**.
-    litertlm 0.18+로 올릴 때 함께 갱신한다.
+  - **litertlm 0.18.0 업그레이드(2026-10-15)**: 0.18은 메시지 content를 **파트 배열**로 템플릿에
+    넘긴다. 문자열 연결(`'...' + message.content`)만 하는 구형 jinja 템플릿은
+    `Failed to apply template: ... string and sequence`로 실패한다.
+    - Qwen2.5-1.5B · MiniCPM5-1B · Qwen3-1.7B · Qwen3-4B: HF main의 0.18용 템플릿 리비전으로 갱신.
+    - Qwen2-0.5B/1.5B-Instruct · Qwen2.5-Coder-3B · Qwen3-0.6B/8B/14B · Qwen3-4B-Instruct-2507:
+      HF에 0.18 대응 리비전이 없어 **카탈로그에서 제외**(47 → 40종). 재패키징되면 다시 추가.
+    - jinja 템플릿이 없는 구형 번들(모델 타입 내장 포맷)과 문자열/파트 양쪽을 처리하는 템플릿은 영향 없음.
+  - 판정 방법: 번들 앞부분(HTTP Range 3MB)에서 템플릿 문자열을 추출해 jinja2로 문자열/파트 두 형식으로
+    렌더링 → 실기기 결과와 일치함을 확인. 게이트 모델은 토큰이 필요해 별도 확인.
 - 리비전이 바뀌면 저장 디렉터리(`<id>_<commit 8자>`)도 바뀌어 기존 사용자는 새로 내려받는다.
 
 ### 개선

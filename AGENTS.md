@@ -13,10 +13,10 @@ On-device LLM inference Android SDK using Google LiteRT-LM.
 - `shared/`는 사용하지 않는 stale 빌드 산출물(무시). settings.gradle에 포함되지 않음.
 
 ## Tech Stack & Constraints
-- **Kotlin**: 2.2.0 / JVM 17
+- **Kotlin**: 2.4.21 / JVM 17 (litertlm 0.18 → kotlin-stdlib 2.4. 소비 앱 Kotlin 2.3+ 필요)
 - **Gradle**: 8.10.2+ (AGP 8.8.x)
 - **Android API**: 26+ (Oreo), compileSdk 36
-- **Core Engine**: `com.google.ai.edge.litertlm:litertlm-android:0.16.1`
+- **Core Engine**: `com.google.ai.edge.litertlm:litertlm-android:0.18.0`
 - **Model Format**: `.litertlm` files.
 
 ## Key Components
