@@ -61,7 +61,7 @@ afterEvaluate {
             create<MavenPublication>("release") {
                 groupId = "com.isroot"
                 artifactId = "lmbridge"
-                version = "0.2.6"
+                version = "0.2.7"
 
                 from(components["release"])
 
