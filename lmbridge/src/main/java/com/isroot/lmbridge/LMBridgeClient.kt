@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * LMBridge 진입점(Facade).
@@ -54,8 +55,8 @@ class LMBridgeClient private constructor(
     @Volatile
     private var state: State = State.IDLE
 
-    @Volatile
-    private var activeChat: EngineSessionChat? = null
+    /** 진행 중인 단발 생성 세션들. 여러 단발 생성이 동시에 돌 수 있어 집합으로 추적한다. */
+    private val oneShotChats: MutableSet<EngineSessionChat> = ConcurrentHashMap.newKeySet()
 
     /** 모델 다운로드 관리자. */
     val models: ModelDownloadManager = ModelDownloadManager(context, store)
@@ -108,21 +109,50 @@ class LMBridgeClient private constructor(
     }
 
     /** 텍스트 프롬프트로 단발 생성(상태 비유지). */
-    fun generate(prompt: String): Flow<GenerationChunk> =
-        generate(MultimodalInput.text(prompt))
+    fun generate(prompt: String, config: ChatConfig = ChatConfig()): Flow<GenerationChunk> =
+        generate(MultimodalInput.text(prompt), config)
 
-    /** 멀티모달 입력으로 단발 생성(상태 비유지). */
-    fun generate(input: MultimodalInput): Flow<GenerationChunk> = flow {
+    /**
+     * 멀티모달 입력으로 단발 생성(상태 비유지).
+     *
+     * 매 호출마다 **독립된 임시 세션**을 열고 끝나면 닫는다. 열려 있는 [Chat]들의 문맥(KV 캐시)은
+     * 건드리지 않으므로, 대화 도중 사실 추출·요약·판단 같은 부수 작업을 대화에 끼워 넣지 말고
+     * 이 메서드로 실행한다(같은 대화에 큰 지시를 섞으면 이후 응답이 오염된다).
+     * 엔진은 생성을 직렬로 처리하므로, 진행 중인 대화 응답이 있으면 끝난 뒤 실행된다.
+     *
+     * @param config 임시 세션 설정(시스템 지시·샘플러·출력 상한 등). [ChatConfig.history]로 퓨샷 예시를 줄 수 있다.
+     */
+    fun generate(input: MultimodalInput, config: ChatConfig = ChatConfig()): Flow<GenerationChunk> = flow {
         ensureReady()
-        val chat = EngineSessionChat(engine.newSession(ChatConfig()))
-        activeChat = chat
+        val chat = EngineSessionChat(engine.newSession(config))
+        oneShotChats += chat
         try {
             emitAll(chat.send(input))
         } finally {
-            if (activeChat === chat) activeChat = null
+            oneShotChats -= chat
             chat.close()
         }
     }
+
+    /**
+     * [generate]의 결과를 답변 텍스트로 모아 반환한다(추론·도구 호출 청크는 제외).
+     *
+     * @throws LMBridgeError 생성 중 오류가 나면 그 오류
+     */
+    suspend fun generateText(prompt: String, config: ChatConfig = ChatConfig()): String =
+        generateText(MultimodalInput.text(prompt), config)
+
+    /** 멀티모달 입력 버전의 [generateText]. */
+    suspend fun generateText(input: MultimodalInput, config: ChatConfig = ChatConfig()): String =
+        buildString {
+            generate(input, config).collect { chunk ->
+                when (chunk) {
+                    is GenerationChunk.Token -> append(chunk.text)
+                    is GenerationChunk.Error -> throw chunk.error
+                    else -> Unit
+                }
+            }
+        }
 
     /** 상태를 유지하는 새 대화 세션을 만든다. 사용 후 [Chat.close]로 해제한다. */
     fun newChat(config: ChatConfig = ChatConfig()): Chat {
@@ -130,15 +160,15 @@ class LMBridgeClient private constructor(
         return EngineSessionChat(engine.newSession(config))
     }
 
-    /** [generate]로 진행 중인 단발 생성을 취소한다(대화 세션은 각 [Chat.stop] 사용). */
+    /** [generate]로 진행 중인 단발 생성을 모두 취소한다(대화 세션은 각 [Chat.stop] 사용). */
     fun stop() {
-        activeChat?.stop()
+        oneShotChats.forEach { it.stop() }
     }
 
     /** 엔진과 모든 자원을 해제한다. 이후 재사용할 수 없다. */
     fun release() {
-        activeChat?.close()
-        activeChat = null
+        oneShotChats.forEach { it.close() }
+        oneShotChats.clear()
         engine.close()
         state = State.RELEASED
     }
@@ -311,8 +341,8 @@ class LMBridgeClient private constructor(
         /**
          * 처리 속도 통계 수집 여부. 기본값 false.
          *
-         * 켜면 [com.isroot.lmbridge.models.Chat.stats]가 첫 토큰 지연(TTFT)과
-         * prefill/decode tokens/s를 함께 반환한다. 성능 측정·튜닝 용도.
+         * 켜면 [com.isroot.lmbridge.models.Chat.stats]가 prefill/decode 토큰 수와 tokens/s를
+         * 함께 반환한다. 성능 측정·튜닝 용도. (첫 토큰 지연(TTFT)은 이 설정과 무관하게 항상 실측된다.)
          */
         fun setEnableBenchmark(enabled: Boolean): Builder =
             apply { this.enableBenchmark = enabled }

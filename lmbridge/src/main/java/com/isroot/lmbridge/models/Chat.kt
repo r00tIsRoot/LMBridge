@@ -24,8 +24,9 @@ interface Chat {
     fun sendToolResponses(responses: List<ToolResponse>): Flow<GenerationChunk>
 
     /**
-     * 현재 대화의 통계. [GenerationStats.contextTokens]는 항상 채워지며, 처리 속도 등
-     * 벤치마크 수치는 `LMBridgeClient.Builder.setEnableBenchmark(true)`일 때만 채워진다.
+     * 현재 대화의 통계. [GenerationStats.contextTokens]와 [GenerationStats.timeToFirstTokenSeconds]는
+     * 항상 채워지며, 토큰 수·처리 속도 등 벤치마크 수치는 `LMBridgeClient.Builder.setEnableBenchmark(true)`일
+     * 때만 채워진다.
      */
     suspend fun stats(): GenerationStats
 
@@ -125,7 +126,8 @@ data class ToolResponse(val name: String, val resultJson: String)
  * 대화 통계.
  *
  * @property contextTokens 현재 대화가 사용 중인 컨텍스트(KV 캐시) 토큰 수
- * @property timeToFirstTokenSeconds 직전 응답의 첫 토큰까지 걸린 시간
+ * @property timeToFirstTokenSeconds 직전 응답의 첫 토큰까지 걸린 시간(전송부터 첫 출력까지 실측, 벤치마크 설정과 무관).
+ *   아직 응답이 없거나 출력 없이 끝났으면 `null`
  * @property prefillTokens 직전 응답의 입력(prefill) 토큰 수
  * @property decodeTokens 직전 응답의 출력(decode) 토큰 수
  * @property prefillTokensPerSecond 입력 처리 속도

@@ -24,15 +24,16 @@ class LMBridgeClient private constructor(...) {
     suspend fun initialize()                 // 멱등, off-main, 실패 시 LMBridgeError
     fun release()                            // 자원 해제
 
-    // 단발 생성 (내부적으로 임시 세션)
-    fun generate(input: MultimodalInput): Flow<GenerationChunk>
-    fun generate(prompt: String): Flow<GenerationChunk>          // 편의 오버로드
+    // 단발 생성 (호출마다 독립 임시 세션 — 열린 Chat의 문맥에 영향 없음)
+    fun generate(input: MultimodalInput, config: ChatConfig = ChatConfig()): Flow<GenerationChunk>
+    fun generate(prompt: String, config: ChatConfig = ChatConfig()): Flow<GenerationChunk>
+    suspend fun generateText(prompt: String, config: ChatConfig = ChatConfig()): String  // 부수 작업용
 
     // 상태 유지 대화
     fun newChat(config: ChatConfig = ChatConfig()): Chat
 
     // 취소
-    fun stop()                               // 활성 생성 취소 (현재 no-op 버그 수정 대상)
+    fun stop()                               // 진행 중인 단발 생성 모두 취소
 
     // 리소스
     val models: ModelDownloadManager

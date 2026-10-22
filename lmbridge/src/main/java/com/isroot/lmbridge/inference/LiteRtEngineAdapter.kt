@@ -176,6 +176,13 @@ private class LiteRtSession(
         const val THOUGHT_CHANNEL = "thought"
     }
 
+    /**
+     * 직전 응답의 첫 토큰 지연(초). 전송 직전부터 첫 출력(답변·추론·도구 호출)까지 직접 잰다.
+     * litertlm BenchmarkInfo의 TTFT는 대화의 첫 턴 값에 고정되어 턴별 값으로 쓸 수 없다.
+     */
+    @Volatile
+    private var lastTimeToFirstTokenSeconds: Double? = null
+
     override fun send(parts: List<MultimodalContent>): Flow<GenerationChunk> =
         // 입력 변환(파일 IO/인코딩)은 실패할 수 있다. 조용히 삼키지 않고
         // GenerationChunk.Error로 표면화한 뒤 스트림을 닫는다.
@@ -202,7 +209,7 @@ private class LiteRtSession(
         }
         GenerationStats(
             contextTokens = tokens,
-            timeToFirstTokenSeconds = bench?.timeToFirstTokenInSecond,
+            timeToFirstTokenSeconds = lastTimeToFirstTokenSeconds,
             prefillTokens = bench?.lastPrefillTokenCount,
             decodeTokens = bench?.lastDecodeTokenCount,
             prefillTokensPerSecond = bench?.lastPrefillTokensPerSecond,
@@ -218,13 +225,20 @@ private class LiteRtSession(
         label: String,
         sendWith: (MessageCallback) -> Unit,
     ): Flow<GenerationChunk> = callbackFlow {
+        val sentAtNanos = System.nanoTime()
+        var firstOutputSeen = false
+        lastTimeToFirstTokenSeconds = null
         val callback = object : MessageCallback {
             override fun onMessage(message: Message) {
-                // 추론(thinking)은 답변과 분리된 thought 채널로 온다.
-                message.channels[THOUGHT_CHANNEL]?.takeIf { it.isNotEmpty() }
-                    ?.let { trySend(GenerationChunk.Thought(it)) }
+                val thought = message.channels[THOUGHT_CHANNEL]?.takeIf { it.isNotEmpty() }
                 // 정식 텍스트 추출 (message.toString() 사용 금지 — 디버그 문자열 오염 방지)
                 val text = message.extractText()
+                if (!firstOutputSeen && (thought != null || text.isNotEmpty() || message.toolCalls.isNotEmpty())) {
+                    firstOutputSeen = true
+                    lastTimeToFirstTokenSeconds = (System.nanoTime() - sentAtNanos) / 1e9
+                }
+                // 추론(thinking)은 답변과 분리된 thought 채널로 온다.
+                thought?.let { trySend(GenerationChunk.Thought(it)) }
                 if (text.isNotEmpty()) trySend(GenerationChunk.Token(text))
                 // 도구 호출을 구조화하여 노출
                 message.toolCalls.forEach { call ->

@@ -113,7 +113,8 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 - `initialize()` 는 **off-main·멱등**입니다. 여러 번 호출해도 안전합니다.
 - 네이티브 세션 생성/해제(`newChat`·`Chat.close`·`release`)는 **블로킹**이므로 백그라운드
   디스패처에서 호출하세요(메인 스레드 호출 시 ANR).
-- 엔진은 **한 번에 대화 세션 1개**만 허용합니다. 자세한 내용은 [실전 패턴](#3-다중-채팅방과-엔진당-세션-1개-제약) 참고.
+- 한 엔진에서 **대화 세션을 여러 개 동시에** 열 수 있습니다(litertlm 0.18+). 세션끼리 문맥이 섞이지 않고,
+  생성 요청은 엔진이 순서대로 처리합니다. 자세한 내용은 [실전 패턴](#3-다중-채팅방과-부수-작업) 참고.
 
 ## API 참조
 
@@ -122,10 +123,11 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 | 메서드 | 설명 |
 |--------|------|
 | `initialize()` | LLM 엔진 초기화 (suspend, 멱등, off-main) |
-| `generate(prompt)` | 텍스트 단발 생성 → `Flow<GenerationChunk>` |
-| `generate(input)` | `MultimodalInput`(텍스트·이미지·오디오·문서 혼합) 단발 생성 |
+| `generate(prompt, config?)` | 텍스트 단발 생성 → `Flow<GenerationChunk>`. 독립된 임시 세션에서 실행되어 열린 `Chat`에 영향 없음 |
+| `generate(input, config?)` | `MultimodalInput`(텍스트·이미지·오디오·문서 혼합) 단발 생성 |
+| `generateText(prompt, config?)` | 단발 생성 결과를 답변 문자열로 반환(suspend). 사실 추출·요약 같은 부수 작업용 |
 | `newChat(config)` | 상태 유지 대화 세션([Chat]) 생성 |
-| `stop()` | 진행 중인 단발 생성 취소 |
+| `stop()` | 진행 중인 단발 생성 모두 취소 |
 | `release()` | 모든 리소스 및 엔진 해제 (이후 재사용 불가) |
 | `models` | 모델 다운로드 관리자([ModelDownloadManager]) |
 
@@ -138,7 +140,7 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 | `setBackend(backend)` | `CPU`(기본) · `GPU` · `NPU` |
 | `setMaxNumTokens(n)` | 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이. **지정하지 않으면 각 모델 내장 최대값(파일명 `ekvNNNN`, 예 ekv4096) 사용.** 값을 지정하면 상한을 낮춰 메모리를 줄임(큰 입력은 잘림) |
 | `setEnableSpeculativeDecoding(b)` | MTP 사용 여부(기본 false). 품질 저하 없이 decode 가속(GPU 권장). MTP 드래프터 포함 모델(Gemma 4 등) 전용 |
-| `setEnableBenchmark(b)` | 처리 속도 통계 수집(기본 false). `Chat.stats()`에 TTFT·tokens/s 포함 |
+| `setEnableBenchmark(b)` | 처리 속도 통계 수집(기본 false). `Chat.stats()`에 prefill/decode 토큰 수·tokens/s 포함 |
 
 셋 다 지정하지 않으면 번들 에셋 `gemma-4-E2B-it.litertlm`을 사용합니다.
 
@@ -177,7 +179,7 @@ chat.send("왜 그런지 설명해줘").collect { chunk ->
         else -> {}
     }
 }
-val stats = chat.stats()  // contextTokens(항상) + TTFT·tokens/s(setEnableBenchmark(true) 시)
+val stats = chat.stats()  // contextTokens·TTFT(항상) + 토큰 수·tokens/s(setEnableBenchmark(true) 시)
 ```
 
 ### GenerationChunk
@@ -418,23 +420,38 @@ private suspend fun releaseActiveClient() = withContext(Dispatchers.Default) {
 }
 ```
 
-### 3. 다중 채팅방과 "엔진당 세션 1개" 제약
+### 3. 다중 채팅방과 부수 작업
 
-LiteRT-LM 엔진은 **엔진당 대화 세션을 1개만** 허용합니다(`Only one session is supported at a
-time`). 여러 채팅방을 UX로 제공하려면, 살아있는 세션을 모두 닫은 뒤 **활성 방에만** 새 세션을
-엽니다. 각 방의 화면 대화 기록(transcript)은 메모리에 유지하되, 방을 전환하면 네이티브 대화
-문맥은 초기화됩니다.
+litertlm 0.18부터 한 엔진에서 대화 세션을 **여러 개 동시에** 열 수 있습니다. 세션마다 KV 캐시가
+따로 유지되므로, 채팅방마다 세션을 열어 두면 방을 오가도 **다시 prefill하지 않습니다**(턴마다 새
+입력만 처리 → 첫 토큰이 빠름). 단, 세션마다 KV 메모리가 들기 때문에 저사양 기기에서는 열어 둘
+세션 수에 상한을 두고 가장 오래 안 쓴 방부터 닫으세요. 닫힌 방은 다시 열 때
+`ChatConfig.history`로 기록을 주입해 문맥을 복원합니다.
 
 ```kotlin
-// 활성 세션을 target 방으로 옮긴다. 네이티브 close/newChat은 블로킹이라 off-main.
-private suspend fun bindSession(client: LMBridgeClient, target: Room) {
-    val toClose = rooms.mapNotNull { r -> r.chat?.also { r.chat = null } }
-    val fresh = withContext(Dispatchers.Default) {
-        toClose.forEach { runCatching { it.close() } }
-        client.newChat(ChatConfig(systemInstruction = systemPrompt))
+// 방마다 세션을 유지하고, 상한을 넘으면 가장 오래 안 쓴 방의 세션을 닫는다(off-main).
+private suspend fun bindSession(client: LMBridgeClient, target: Room) = withContext(Dispatchers.Default) {
+    if (target.chat == null) {
+        target.chat = client.newChat(ChatConfig(systemInstruction = systemPrompt, history = historyOf(target)))
     }
-    target.chat = fresh
+    target.lastUsed = System.nanoTime()
+    rooms.filter { it.chat != null }
+        .sortedByDescending { it.lastUsed }
+        .drop(MAX_OPEN_SESSIONS)
+        .forEach { r -> r.chat?.close(); r.chat = null }
 }
+```
+
+**부수 작업은 대화에 끼워 넣지 마세요.** 사실 추출·요약·판단처럼 대화와 상관없는 지시를 같은 `Chat`에
+보내면 이후 응답이 그 지시에 끌려가 대화가 오염됩니다. `generate`/`generateText`는 매번 독립된 임시
+세션에서 실행되므로 열린 대화의 문맥을 건드리지 않습니다. 엔진은 생성을 순서대로 처리하므로, 대화
+응답이 진행 중이면 그 뒤에 실행됩니다.
+
+```kotlin
+val facts = client.generateText(
+    "다음 대화에서 사용자에 관한 사실을 JSON 줄로 뽑아줘:\n$recentTurns",
+    ChatConfig(systemInstruction = "You extract facts.", maxOutputTokens = 256),
+)
 ```
 
 ## 백엔드 설정
