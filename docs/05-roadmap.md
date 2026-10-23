@@ -51,7 +51,8 @@
 ## M3 — 백엔드 & 성능
 **목표**: 기기 편차를 흡수하고 성능 옵션 제공.
 
-- [ ] **G8** `Backend.AUTO` + `BackendResolver`(NPU→GPU→CPU 폴백)
+- [x] **G8** 백엔드 폴백 — 자동 폴백 대신 앱이 결정하도록 변경: 초기화 실패를 `InvalidModel`(파일 문제)과
+  `BackendUnavailable`(재시도 가능)로 구분, 손상 헤더 사전 검사(JNI 중단 방지), `setCpuThreadCount` 추가
 - [ ] **G13** WorkManager 백그라운드 다운로드 + `DownloadPolicy`(WiFi/Unmetered)
 - [ ] 네트워크 스택 OkHttp 전환 검토
 - [x] `GenerationStats`(컨텍스트 토큰, TTFT, 토큰/초) 노출 — `Chat.stats()` + `setEnableBenchmark`
@@ -61,7 +62,7 @@
 - [x] litertlm 0.18.0 업그레이드(Kotlin 2.4.21 → 소비 앱 Kotlin 2.3+ 필요). 0.18 템플릿 비호환 Qwen 7종 카탈로그 제외
 - [ ] `EmbeddingEngine` 래핑, `ConversationConfig.chatTemplate` 노출 검토
 
-**Exit**: GPU 미지원 기기에서 자동으로 CPU 폴백. WiFi 전용 백그라운드 다운로드 성공.
+**Exit**: GPU 미지원 기기에서 앱이 CPU로 재시도할 수 있음(README 패턴). WiFi 전용 백그라운드 다운로드 성공.
 
 ---
 
@@ -90,5 +91,5 @@
 |--------|------|
 | litertlm API가 버전 간 변동 | 어댑터 격리(M1)로 파급 최소화 |
 | 대용량 모델 테스트 비용/시간 | `GEMMA3_1B_IT`(584MB)를 CI/데모 기본으로 |
-| GPU/NPU 기기 편차 | AUTO 폴백 + `required=false` 네이티브 선언 |
+| GPU/NPU 기기 편차 | 실패 원인 구분 + 앱 측 폴백 + `required=false` 네이티브 선언 |
 | KMP 방향성 미확정(`shared/`) | M0에서 제거로 결정, 필요 시 별도 스파이크 |

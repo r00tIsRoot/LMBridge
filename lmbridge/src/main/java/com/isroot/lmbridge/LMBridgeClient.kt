@@ -45,6 +45,7 @@ class LMBridgeClient private constructor(
     private val audioBackend: LMBridge.Backend?,
     private val maxInputBytesOverride: Long?,
     private val enableBenchmark: Boolean,
+    private val cpuThreadCount: Int?,
 ) {
     private enum class State { IDLE, READY, RELEASED }
 
@@ -67,6 +68,10 @@ class LMBridgeClient private constructor(
      *
      * @throws LMBridgeError.Released release() 이후 호출 시
      * @throws LMBridgeError.ModelNotFound 모델을 찾을 수 없을 때
+     * @throws LMBridgeError.InvalidModel 모델 파일이 손상되었거나 읽을 수 없을 때(백엔드를 바꿔도 실패)
+     * @throws LMBridgeError.BackendUnavailable 요청한 백엔드로 엔진을 만들 수 없을 때. 다른 백엔드로
+     *   새 클라이언트를 만들어 재시도할 수 있다(예: GPU 실패 → CPU).
+     * @throws LMBridgeError.OutOfMemory 엔진 생성 중 메모리가 부족할 때
      */
     suspend fun initialize() = initMutex.withLock {
         when (state) {
@@ -88,6 +93,7 @@ class LMBridgeClient private constructor(
                 maxInputBytes = resolveMaxInputBytes(),
                 nativeLibraryDir = context.applicationInfo.nativeLibraryDir,
                 enableBenchmark = enableBenchmark,
+                cpuThreadCount = cpuThreadCount,
             ),
         )
         state = State.READY
@@ -264,6 +270,7 @@ class LMBridgeClient private constructor(
         private var audioBackend: LMBridge.Backend? = null
         private var maxInputBytesOverride: Long? = null
         private var enableBenchmark: Boolean = false
+        private var cpuThreadCount: Int? = null
 
         /** 로컬 모델 파일 경로를 직접 지정. */
         fun setModelPath(path: String): Builder = apply { modelPath = path }
@@ -347,6 +354,19 @@ class LMBridgeClient private constructor(
         fun setEnableBenchmark(enabled: Boolean): Builder =
             apply { this.enableBenchmark = enabled }
 
+        /**
+         * CPU 백엔드 추론 스레드 수. 설정하지 않으면(기본 null) litertlm 기본값을 쓴다.
+         *
+         * 메인 백엔드가 CPU일 때뿐 아니라 CPU로 지정한 비전·오디오 인코더에도 적용된다.
+         * 기본값은 기기 코어 수보다 적게 잡힐 수 있다. SM-A426N(8코어, Gemma 4 E2B CPU)에서는 기본값 대비
+         * 4~6 스레드가 prefill 약 1.6배·첫 토큰 지연 약 절반이었고, 8 스레드는 더 빨라지지 않았다.
+         * 최적값은 기기마다 다르므로 대상 기기에서 [setEnableBenchmark]로 측정해 정한다.
+         */
+        fun setCpuThreadCount(threadCount: Int): Builder = apply {
+            require(threadCount > 0) { "threadCount must be positive: $threadCount" }
+            this.cpuThreadCount = threadCount
+        }
+
         fun build(): LMBridgeClient =
             LMBridgeClient(
                 context,
@@ -360,6 +380,7 @@ class LMBridgeClient private constructor(
                 audioBackend,
                 maxInputBytesOverride,
                 enableBenchmark,
+                cpuThreadCount,
             )
     }
 

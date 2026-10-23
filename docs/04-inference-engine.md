@@ -55,10 +55,14 @@ enum class Backend { AUTO, CPU, GPU, NPU }
 
 - **현재**: `LMBridge.Backend`에 `AUTO`가 없고, `convertToLiteRtBackend`는 1:1 변환만.
   GPU 초기화 실패 시 폴백이 없어 기기에 따라 그냥 실패한다.
-- **목표**: `AUTO`는 `NPU?→GPU?→CPU` 순으로 시도하고, 각 단계 실패(`BackendUnavailable`,
-  네이티브 로드 실패, OOM 등)를 잡아 다음 후보로 폴백. 최종 실패 시
-  `LMBridgeError.BackendUnavailable`.
-- 폴백 결정 결과(선택된 백엔드)를 로그/`GenerationStats`로 노출해 디버깅을 돕는다.
+- **결정**: 라이브러리 자동 폴백(`AUTO`)은 두지 않는다. 폴백 여부는 앱 정책(큰 모델은 CPU에서
+  쓸 수 없을 만큼 느림, 사용자 고지 등)이고, 실패한 GPU 초기화 뒤 네이티브 정리 보장 부담도 크다.
+  대신 라이브러리는 앱이 판단할 근거를 준다:
+  - `InitFailures.checkHeader`: `.litertlm` 매직 넘버 사전 검사. 헤더가 깨진 파일은 litertlm 0.18이
+    원본 바이트를 JNI 문자열로 만들다 SIGABRT로 프로세스를 죽인다(예외로 잡을 수 없음).
+  - `InitFailures.classify`: 메시지(absl 상태)로 모델 문제(`NOT_FOUND ... not found in the model`,
+    `Invalid magic number` 등)를 `InvalidModel`로, 나머지를 `BackendUnavailable`로 분류.
+  - `setCpuThreadCount` → `Backend.CPU(threadCount)`.
 - OpenCL 네이티브 라이브러리는 매니페스트에 `required=false`로 선언되어 있어(01 §7),
   미지원 기기에서도 설치는 되고 런타임 폴백이 안전하다.
 

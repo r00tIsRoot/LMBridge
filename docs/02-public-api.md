@@ -137,7 +137,8 @@ sealed interface GenerationChunk {
 sealed class LMBridgeError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class NotInitialized       : LMBridgeError("Engine not initialized")
     class ModelNotFound        (path: String) : LMBridgeError("Model not found: $path")
-    class BackendUnavailable   (backend: Backend) : LMBridgeError("Backend unavailable: $backend")
+    class BackendUnavailable   (backend: Backend) : LMBridgeError("Backend unavailable: $backend")  // 다른 백엔드로 재시도 가능
+    class InvalidModel         (path: String) : LMBridgeError("Invalid model file: $path")       // 손상·헤더 불일치, 재시도 무의미
     class OutOfMemory          (cause: Throwable?) : LMBridgeError("Out of memory", cause)
     class DownloadFailed       (message: String, cause: Throwable? = null) : LMBridgeError(message, cause)
     class IntegrityCheckFailed (expected: String, actual: String) : LMBridgeError("Integrity mismatch")

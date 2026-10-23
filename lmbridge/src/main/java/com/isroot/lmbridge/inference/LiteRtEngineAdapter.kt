@@ -58,6 +58,10 @@ internal class LiteRtEngineAdapter(
     @Volatile
     private var nativeLibraryDir: String? = null
 
+    /** 초기화 시 확정한 CPU 스레드 수(null이면 litertlm 기본). */
+    @Volatile
+    private var cpuThreadCount: Int? = null
+
     @Volatile
     private var engine: Engine? = null
 
@@ -75,8 +79,12 @@ internal class LiteRtEngineAdapter(
                 "maxNumImages=${init.maxNumImages}, visionBackend=${init.visionBackend}, " +
                 "audioBackend=${init.audioBackend}, maxInputBytes=${init.maxInputBytes})",
         )
+        InitFailures.checkHeader(init.modelPath)?.let { reason ->
+            throw LMBridgeError.InvalidModel(init.modelPath, reason = reason)
+        }
         maxInputBytes = init.maxInputBytes
         nativeLibraryDir = init.nativeLibraryDir
+        cpuThreadCount = init.cpuThreadCount
         applyNativeLogSeverity()
 
         // MTP(speculative decoding) 및 벤치마크 수집 활성화. 엔진 생성 전에 설정해야 한다.
@@ -106,10 +114,8 @@ internal class LiteRtEngineAdapter(
         try {
             engine = Engine(config).apply { initialize() }
             Logger.d(TAG, "Engine initialized")
-        } catch (e: OutOfMemoryError) {
-            throw LMBridgeError.OutOfMemory(e)
         } catch (e: Throwable) {
-            throw LMBridgeError.BackendUnavailable(init.backend, e)
+            throw InitFailures.classify(e, init.backend, init.modelPath)
         }
     }
 
@@ -138,7 +144,7 @@ internal class LiteRtEngineAdapter(
     }
 
     private fun toLiteRtBackend(backend: LMBridge.Backend): LiteRtBackend = when (backend) {
-        LMBridge.Backend.CPU -> LiteRtBackend.CPU()
+        LMBridge.Backend.CPU -> LiteRtBackend.CPU(threadCount = cpuThreadCount)
         LMBridge.Backend.GPU -> LiteRtBackend.GPU()
         LMBridge.Backend.NPU -> nativeLibraryDir?.let { LiteRtBackend.NPU(nativeLibraryDir = it) }
             ?: LiteRtBackend.NPU()

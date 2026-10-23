@@ -141,6 +141,7 @@ Builder.build()  →  initialize()  →  generate() / newChat()  →  release()
 | `setMaxNumTokens(n)` | 총 컨텍스트(입력+출력 합산) 토큰 상한 = KV 캐시 길이. **지정하지 않으면 각 모델 내장 최대값(파일명 `ekvNNNN`, 예 ekv4096) 사용.** 값을 지정하면 상한을 낮춰 메모리를 줄임(큰 입력은 잘림) |
 | `setEnableSpeculativeDecoding(b)` | MTP 사용 여부(기본 false). 품질 저하 없이 decode 가속(GPU 권장). MTP 드래프터 포함 모델(Gemma 4 등) 전용 |
 | `setEnableBenchmark(b)` | 처리 속도 통계 수집(기본 false). `Chat.stats()`에 prefill/decode 토큰 수·tokens/s 포함 |
+| `setCpuThreadCount(n)` | CPU 백엔드(비전·오디오 CPU 인코더 포함) 추론 스레드 수. 미지정 시 litertlm 기본값 |
 
 셋 다 지정하지 않으면 번들 에셋 `gemma-4-E2B-it.litertlm`을 사용합니다.
 
@@ -469,7 +470,31 @@ GPU는 prefill이 CPU보다 수 배 빠르고 메모리 사용량도 낮아(Gemm
 prefill 3808 vs 557 tk/s, 피크 메모리 676 vs 1733MB) 지원 기기에서는 GPU를 권장합니다.
 
 GPU(OpenCL)/NPU 네이티브 라이브러리는 매니페스트에 `required="false"`로 선언되어, 미지원
-기기에서도 설치가 가능합니다. (AUTO 자동 폴백은 로드맵 M3 예정 — [docs/05-roadmap.md](docs/05-roadmap.md))
+기기에서도 설치가 가능합니다.
+
+### GPU 실패 시 CPU로 폴백
+
+폴백 여부는 앱이 정합니다(큰 모델은 CPU에서 너무 느려 차라리 실패가 나을 수 있음). 라이브러리는
+실패 원인을 구분해 줍니다. `BackendUnavailable`이면 다른 백엔드로 새 클라이언트를 만들어 재시도하고,
+`InvalidModel`(파일 손상·헤더 불일치)은 백엔드를 바꿔도 실패하므로 재다운로드를 안내합니다.
+
+```kotlin
+suspend fun createClient(backend: LMBridge.Backend): LMBridgeClient {
+    val client = LMBridgeClient.Builder(context).setModel(model).setBackend(backend).build()
+    try {
+        client.initialize()
+        return client
+    } catch (e: LMBridgeError.BackendUnavailable) {
+        client.release()
+        if (backend == LMBridge.Backend.CPU) throw e
+        return createClient(LMBridge.Backend.CPU)
+    }
+}
+```
+
+CPU 추론 스레드 수는 `setCpuThreadCount(n)`으로 정합니다. 기본값은 코어 수보다 적게 잡힐 수 있어,
+SM-A426N(8코어, Gemma 4 E2B)에서는 4~6 스레드가 기본값 대비 prefill 약 1.6배·첫 토큰 지연 약 절반이었습니다
+(8 스레드는 이득 없음). 최적값은 기기마다 다르니 `setEnableBenchmark(true)`로 측정해 정하세요.
 
 ## 로그 설정
 
@@ -492,8 +517,8 @@ LMBridge.logLevel = LMBridge.LogLevel.DEBUG   // enum으로 직접 설정
 
 ## 오류 처리
 
-`initialize()`는 실패 시 타입화된 [LMBridgeError]를 던집니다(`ModelNotFound`, `Released`,
-`NotInitialized`, `IntegrityCheckFailed`, `DownloadFailed` 등). 생성 스트림의 오류는
+`initialize()`는 실패 시 타입화된 [LMBridgeError]를 던집니다(`ModelNotFound`, `InvalidModel`,
+`BackendUnavailable`, `OutOfMemory`, `Released` 등). 생성 스트림의 오류는
 `GenerationChunk.Error`로 전달됩니다.
 
 ```kotlin
@@ -502,6 +527,10 @@ lifecycleScope.launch {
         client.initialize()
     } catch (e: LMBridgeError.ModelNotFound) {
         // 모델을 먼저 다운로드하세요: client.models.downloadModel(...)
+    } catch (e: LMBridgeError.InvalidModel) {
+        // 파일이 손상됨 → 삭제 후 재다운로드
+    } catch (e: LMBridgeError.BackendUnavailable) {
+        // 다른 백엔드로 재시도(위 "GPU 실패 시 CPU로 폴백")
     } catch (e: Exception) {
         Log.e("LMBridge", "초기화 실패: ${e.message}")
     }

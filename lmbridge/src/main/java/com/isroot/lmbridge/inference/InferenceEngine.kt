@@ -76,4 +76,6 @@ internal data class EngineInit(
     val nativeLibraryDir: String? = null,
     // true면 대화별 처리 속도(TTFT, prefill/decode tokens/s)를 수집한다.
     val enableBenchmark: Boolean = false,
+    // CPU 백엔드(메인·비전·오디오 공통) 추론 스레드 수. null이면 litertlm 기본값.
+    val cpuThreadCount: Int? = null,
 )

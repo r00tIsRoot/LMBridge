@@ -26,9 +26,16 @@ sealed class LMBridgeError(
     class ModelNotFound(path: String?) :
         LMBridgeError("Model file not found${if (path != null) ": $path" else ""}")
 
-    /** 요청한 백엔드를 사용할 수 없음. */
-    class BackendUnavailable(backend: LMBridge.Backend, cause: Throwable? = null) :
+    /**
+     * 요청한 백엔드를 사용할 수 없음. 모델 파일 문제는 [InvalidModel]로 따로 오므로,
+     * 이 오류는 다른 백엔드(예: [LMBridge.Backend.CPU])로 재시도할 근거가 된다.
+     */
+    class BackendUnavailable(val backend: LMBridge.Backend, cause: Throwable? = null) :
         LMBridgeError("Backend unavailable: $backend", cause)
+
+    /** 모델 파일이 손상되었거나(잘림·헤더 불일치) 이 런타임이 읽을 수 없음. 백엔드를 바꿔도 해결되지 않는다. */
+    class InvalidModel(val path: String, cause: Throwable? = null, reason: String? = null) :
+        LMBridgeError("Invalid model file: $path${reason?.let { " ($it)" } ?: ""}", cause)
 
     /** 네이티브 메모리 부족. */
     class OutOfMemory(cause: Throwable? = null) : LMBridgeError("Out of memory during inference", cause)
